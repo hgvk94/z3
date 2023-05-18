@@ -86,6 +86,7 @@ class sms_solver : public extension {
     literal_vector m_ext_clause;
     sms_solver *m_pSolver;
     sms_solver *m_nSolver;
+    solver* m_validator;
     // Keep track of how many times literals have been exchanged.
     // Might be useful for conflict analysis
     size_t m_tx_idx;
@@ -111,6 +112,7 @@ class sms_solver : public extension {
         unsigned v;
         SASSERT(!m_expr2var.find(n, v));
         v = m_solver->add_var(true);
+        m_validator->add_var(true);
         TRACE("satmodsat",
               tout << "adding var " << v << " for expr " << expr_ref(n, m););
         m_expr2var.insert(n, v);
@@ -142,9 +144,19 @@ class sms_solver : public extension {
           m_mode(SEARCH), m_exiting(false), m_search_lvl(0), m_validate_lvl(0),
           m_next_lit(null_literal), m_unsat(false), m_itp(nullptr) {
         update_params(p);
+        m_validator = alloc(solver, p, m.limit());
     }
+        void validate(literal_vector cls) {
+            DEBUG_CODE(
+                literal_vector neg;
+                for (auto l : cls) neg.push_back(~l);
+                if (!m_validator->check(neg)) {
+                    IF_VERBOSE(0, verbose_stream() << "cannot validate" << cls;);
+                });
+        }
     ~sms_solver() {
       m_out->flush();
+      dealloc(m_validator);
     }
         ext_justification_idx get_ext_justification_idx() const { return m_id; }
     void drat_dump_ext_unit(literal, ext_justification_idx);

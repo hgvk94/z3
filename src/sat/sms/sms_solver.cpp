@@ -86,6 +86,8 @@ unsigned sms_solver::place_highest_dl_at_start(literal_vector& cls) {
 // add cls to solver, return ptr to the new clause
 clause* sms_solver::learn_clause(literal_vector& cls) {
     dbg_print_lv("learning lemma", cls);
+    literal_vector tmp(cls);
+    m_validator->add_clause(tmp.size(), tmp.data(), sat::status::asserted());
     DEBUG_CODE(unsigned i = 1; for (; i < cls.size(); i++) SASSERT(m_solver->lvl(cls[i]) <= m_solver->lvl(cls[0])););
     return  m_solver->mk_clause(cls.size(), cls.data(), sat::status::redundant());
 }
@@ -96,6 +98,9 @@ void sms_solver::learn_clause_and_update_justification(
     literal_vector cls;
     cls.push_back(l);
     for (auto a : antecedent) cls.push_back(a);
+    if (idx == NSOLVER_EXT_IDX) m_nSolver->validate(cls);
+    else m_pSolver->validate(cls);
+
     if (m_drating) drat_dump_cp(cls, idx);
     place_highest_dl_at_start(cls);
     clause* c = learn_clause(cls);
@@ -149,6 +154,7 @@ bool sms_solver::get_reason_final(literal_vector &lc,
     dbg_print("getting final ext reason for conflict");
     if (m_solver->resolve_conflict_for_ext_core(lc, eidx)) {
         dbg_print_lv("final reason is", lc);
+        validate(lc);
         return true;
     }
     dbg_print("cannot express conflict in terms of shared vars");
@@ -279,6 +285,7 @@ void sms_solver::set_conflict(sms_solver* solver) {
     // learn m_ext_clause
     SASSERT(!m_ext_clause.empty());
     place_highest_dl_at_start(m_ext_clause);
+    solver->validate(m_ext_clause);
     dbg_print_lv("other solver unsat with current trail, learning lemma ", m_ext_clause);
     if (m_drating) drat_dump_cp(m_ext_clause, idx);
     clause *c = learn_clause(m_ext_clause);
@@ -309,6 +316,10 @@ void sms_solver::set_conflict(sms_solver* solver) {
 void sms_solver::asserted(literal l) {
     dbg_print_lit("asserted lit", l);
     TRACE("satmodsat", m_solver->display_justification(tout, m_solver->get_justification(l)););
+    if (m_solver->lvl(l) == 0) {
+        literal_vector uc; uc.push_back(l);
+        validate(uc);
+    }
     if (m_shared[l.var()]) {
         m_asserted.push_back(l);
         if (m_pSolver && get_mode() != LOOKAHEAD)
@@ -559,6 +570,7 @@ void sms_solver::handle_mode_transition() {
           exit_validate(bj_lvl);
           dbg_print_lv("validate hit a conflict below validate lvl, learning "
                        "lemma and exiting", m_ext_clause);
+          validate(m_ext_clause);
           learn_clause(m_ext_clause);
       } else {
           find_and_set_decision_lit();
@@ -577,6 +589,7 @@ void sms_solver::handle_mode_transition() {
         SASSERT(m_core != nullptr);
         unsigned bj_lvl = place_highest_dl_at_start(*m_core);
         exit_search(bj_lvl);
+        validate(m_ext_clause);
         // learn clause in psolver as well. This is optional
         learn_clause(*m_core);
     }
@@ -638,11 +651,14 @@ lbool sms_solver::resolve_conflict() {
         m_solver->pop(m_solver->scope_lvl() - bj_lvl);
         SASSERT(m_solver->scope_lvl() == bj_lvl);
         SASSERT(!m_solver->inconsistent());
+        validate(lemma);
         learn_clause(lemma);
         ext_justification_idx idx = get_mode() == VALIDATE ? PSOLVER_EXT_IDX : NSOLVER_EXT_IDX;
         for(literal l : unit_lits) {
             literal_vector uc(1, {l});
             if (m_drating) drat_dump_cp(uc, idx);
+            sms_solver* s = get_mode() == VALIDATE ? m_pSolver : m_nSolver;
+            s->validate(uc);
             learn_clause(uc);
         }
         auto handle_reinit_conflict = [&] () {
@@ -756,6 +772,7 @@ void sms_solver::add_clause_expr(expr *fml) {
         c.push_back(l);
     }
     m_solver->add_clause(c.size(), c.data(), sat::status::input());
+    m_validator->add_clause(c.size(), c.data(), sat::status::input());
 }
 
 void satmodsatcontext::addA(expr_ref fml) {

@@ -1744,7 +1744,7 @@ namespace sat {
             return l_undef;
         }
         else {
-            mk_model();
+            //mk_model();
             return l_true;
         }
     }
