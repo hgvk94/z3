@@ -654,7 +654,7 @@ public:
                 unsigned i = start == 0 ? 0 : m_scopes[start].m_trail_lim;
                 for(; i < m_trail.size(); i++) {
                         l = m_trail[i];
-                        if(lvl(l) >= start && lvl(l) <= end) {
+                        if(lvl(l) >= start && lvl(l) <= end && m_justification[l.var()].is_ext_justification()) {
                                 t.push_back(l);
                                 j.push_back(m_justification[l.var()]);
                         }

@@ -684,9 +684,8 @@ lbool sms_solver::resolve_conflict() {
             while (m_solver->scope_lvl() < js.level()) m_solver->push();
             // The trail is unordered. So we could be assigning literals at a
             // lower level than solver->scope_lvl()
-            SASSERT(js.level() <= bj_lvl);
-            SASSERT(m_solver->value(l) == l_undef || js.level() == 0);
-            if(m_solver->value(l) == l_undef) m_solver->assign_core(l, js);
+            SASSERT(js.level() >= bj_lvl);
+            m_solver->assign(l, js);
             m_solver->propagate(false);
             if (m_solver->inconsistent()) {
                 return handle_reinit_conflict();
