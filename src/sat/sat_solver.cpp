@@ -19,6 +19,7 @@ Revision History:
 
 
 #include "util/debug.h"
+#include "util/lbool.h"
 #include <cmath>
 #ifndef SINGLE_THREAD
 #include <thread>
@@ -57,6 +58,7 @@ namespace sat {
         m_mus(*this),
         m_binspr(*this),
         m_inconsistent(false),
+        m_unresolvable(false),
         m_searching(false),
         m_conflict(justification(0)),
         m_num_frozen(0),
@@ -65,6 +67,7 @@ namespace sat {
         m_qhead(0),
         m_scope_lvl(0),
         m_search_lvl(0),
+        m_ext_assumption_lvl(0),
         m_fast_glue_avg(),
         m_slow_glue_avg(),
         m_fast_glue_backup(),
@@ -1708,12 +1711,17 @@ namespace sat {
         }
     }
 
-  //search above lvl
-  bool solver::search_above(unsigned lvl) {
+    //search above m_ext_assumption_lvl
+    // returns true (sat), false (hit a conflict below m_ext_assumption_lvl), or
+    // undef (cannot resolve a conflict)
+  lbool solver::search_above() {
+    SASSERT(!unresolvable());
     lbool is_sat = l_undef;
     init_search();
-    while (is_sat == l_undef && m_scope_lvl >= lvl) {
-      if (inconsistent()) is_sat = resolve_conflict_core();
+    while (is_sat == l_undef) {
+      // if the previous propagation/conflict analysis put the solver in an unresolvable state, return
+      if (unresolvable()) return l_undef;
+      else if (inconsistent()) is_sat = resolve_conflict_core();
       else if (should_propagate()) propagate(true);
       else if (do_cleanup(false)) continue;
       else if (should_gc()) do_gc();
@@ -1722,7 +1730,7 @@ namespace sat {
       //      else if (should_simplify()) do_simplify();
       else if (!decide()) is_sat = final_check();
     }
-    return is_sat == l_true;
+    return is_sat;
   }
 
     bool solver::should_propagate() const {        
@@ -2365,140 +2373,8 @@ namespace sat {
         }
     }
 
-    // HELPER method for SMS. Implemented here because it needs to accurately
-    // compute backtrack level, which requires iterating m_trail in reverse
-
-    // Check if there exists a literal l s.t. justification(l) == ext but
-    // get_antecedent(l) returns the empty set. In SMS, this implies that l
-    // cannot be explained using decisions of a single solver, triggering a mode transition
-    // Return conflict level and first UIP backjump level
-    bool solver::check_resolvable(unsigned& c_lvl, unsigned& bj_lvl, literal_vector& lemma, literal_vector& ext_unit_lits) {
-        literal consequent = null_literal;
-        bool unique_max;
-        bj_lvl = 0;
-        //Since we don't want to change state of the sat solver, use c_lvl
-        //instead of m_conflict_lvl
-        c_lvl = get_max_lvl(m_not_l, m_conflict, unique_max);
-        // unsat is by default non-resolvable
-        if (c_lvl == 0) return false;
-        bool_var_vector marked;
-        lemma.reset();
-        lemma.push_back(null_literal);
-        auto process_antecedent = [&] (literal pa_l, unsigned& pa_num_marks) {
-            TRACE("satmodsat", tout << "processing antecedent of " << pa_l << " num_marks: " << pa_num_marks << "\n";);
-            bool_var pa_v = pa_l.var();
-            unsigned pa_lvl = lvl(pa_v);
-            if (!is_marked(pa_v) && lvl(pa_v) > 0) {
-                mark(pa_v);
-                marked.push_back(pa_v);
-                if (pa_lvl == c_lvl)
-                    pa_num_marks++;
-                else {
-                    bj_lvl = std::max(bj_lvl, pa_lvl);
-                    lemma.push_back(~pa_l);
-                }
-            }
-            if (pa_lvl == 0 && m_justification[pa_v].is_ext_justification()) {
-                ext_unit_lits.push_back(pa_l);
-            }
-        };
-        auto reset_marks = [&] (bool_var_vector& to_be_reset) {
-            for(auto v : to_be_reset) if(is_marked(v)) reset_mark(v);
-        };
-
-        auto skip_literals_above_c_lvl = [&] () {
-            unsigned idx = m_trail.size();
-            SASSERT(idx > 0);
-            idx--;
-            // skip literals from levels above the conflict level
-            while (lvl(m_trail[idx]) > c_lvl) {
-                SASSERT(idx > 0);
-                idx--;
-            }
-            return idx;
-        };
-        unsigned idx = skip_literals_above_c_lvl();
-        unsigned num_marks = 0;
-        SASSERT(idx < (int) m_trail.size());
-
-        justification js = m_conflict;
-        if (m_not_l != null_literal) {
-            process_antecedent(m_not_l, num_marks);
-            consequent = ~m_not_l;
-        }
-
-        do {
-            switch (js.get_kind()) {
-            case justification::NONE:
-                break;
-            case justification::BINARY:
-                process_antecedent(~(js.get_literal()), num_marks);
-                break;
-            case justification::CLAUSE: {
-                clause & c = get_clause(js);
-                unsigned i = 0;
-                if (consequent != null_literal) {
-                    SASSERT(c[0] == consequent || c[1] == consequent);
-                    if (c[0] == consequent) {
-                        i = 1;
-                    }
-                    else {
-                        process_antecedent(~c[0], num_marks);
-                        i = 2;
-                    }
-                }
-                unsigned sz = c.size();
-                for (; i < sz; i++)
-                    process_antecedent(~c[i], num_marks);
-                break;
-            }
-            case justification::EXT_JUSTIFICATION: {
-                //This should really be a probing query. However, we do not do
-                //another conflict resolution if this conflict is resolvable
-                //This does not lead to learning same lemma multiple times
-                //because justifications are updated
-                fill_ext_antecedents(consequent, js, false);
-                if (m_ext_antecedents.empty()) {
-                    //conflict is below assumptions level. Trigger mode transition
-                    reset_marks(marked);
-                    return false;
-                }
-                for (literal l : m_ext_antecedents)
-                    process_antecedent(l, num_marks);
-                break;
-            }
-            default:
-                UNREACHABLE();
-                break;
-            }
-
-            bool_var c_var;
-            while (true) {
-                consequent = m_trail[idx];
-                c_var = consequent.var();
-                if (is_marked(c_var)) {
-                    if (lvl(c_var) == c_lvl) {
-                        break;
-                    }
-                    SASSERT(lvl(c_var) < c_lvl);
-                }
-                VERIFY(idx > 0);
-                idx--;
-            }
-            SASSERT(lvl(consequent) == c_lvl);
-            js             = m_justification[c_var];
-            idx--;
-            num_marks--;
-            reset_mark(c_var);
-        }
-        while (num_marks > 0);
-        lemma[0] = ~consequent;
-        SASSERT(lemma.size() > 1 || bj_lvl == 0);
-        reset_marks(marked);
-        return true;
-    }
-
     lbool solver::resolve_conflict_core() {
+        SASSERT(!unresolvable());
         m_conflicts_since_init++;
         m_conflicts_since_restart++;
         m_conflicts_since_gc++;
@@ -2519,6 +2395,7 @@ namespace sat {
             return l_false;
         }
 
+
         if (m_conflict_lvl == 0) {
             if(m_ext) m_ext->resolve_conflict();
             drat_explain_conflict();
@@ -2526,6 +2403,11 @@ namespace sat {
                 drat_log_clause(0, nullptr, sat::status::redundant());
             TRACE("sat", tout << "conflict level is 0\n";);
             return l_false;
+        }
+
+        if (m_conflict_lvl <= m_ext_assumption_lvl) {
+            if (resolve_conflict_for_ext_core()) return l_false;
+            return l_undef;
         }
 
         // force_conflict_analysis is used instead of relying on normal propagation to assign m_not_l 
@@ -2610,6 +2492,12 @@ namespace sat {
             }
             case justification::EXT_JUSTIFICATION: {
                 fill_ext_antecedents(consequent, js, false);
+                if (unresolvable()) {
+                    TRACE("sat", tout << "cannot resolve ext literal: " << consequent << "\n";);
+                    m_lemma.reset();
+                    SASSERT(m_inconsistent);
+                    return l_undef;
+                }
                 TRACE("sat", tout << "ext antecedents: " << m_ext_antecedents << "\n";);
                 for (literal l : m_ext_antecedents) 
                     process_antecedent(l, num_marks);
@@ -2742,25 +2630,24 @@ namespace sat {
         return m_conflicts_since_init > m_config.m_backtrack_init_conflicts;
     }
 
-    void solver::process_antecedent_for_ext_core(literal antecedent, ext_justification_idx ext_idx, literal_vector& core, unsigned & num_marks) {
+    void solver::process_antecedent_for_ext_core(literal antecedent, unsigned & num_marks) {
         bool_var var     = antecedent.var();
         justification js = m_justification[var];
         SASSERT(var < num_vars());
         TRACE("sat", tout << antecedent << " " << (is_marked(var)?"+":"-") << "\n";);
         if (!is_marked(var)) {
             mark(var);
-            m_unmark.push_back(var); 
-            if (js.is_ext_justification() && js.get_ext_justification_idx() == ext_idx)
-                core.push_back(~antecedent);
-            else
+            m_unmark.push_back(var);
+            SASSERT(js.level() <= m_conflict_lvl);
+            if (js.is_ext_justification())
+                m_ext_core->push_back(~antecedent);
+            else if (js.level() != 0)
                 num_marks++;
         }
     }
 
     bool solver::process_consequent_for_ext_core(literal consequent,
-                                                 ext_justification_idx ext_idx,
                                                  justification const& js,
-                                                 literal_vector& core,
                                                  unsigned & num_marks) {
         TRACE("sat", tout << "processing consequent: ";
               if (consequent == null_literal) tout << "null\n";
@@ -2768,10 +2655,14 @@ namespace sat {
               display_justification(tout << "js kind: ", js) << " marks: " << num_marks << "\n";);
         literal_vector todo;
         switch (js.get_kind()) {
-            case justification::NONE:
-                return js.level() == 0;
+            case justification::NONE: {
+                if (js.level() == 0) return true;
+                m_ext_core->reset();
+                m_ext_core->push_back(consequent);
+                return false;
+            }
             case justification::BINARY:
-                process_antecedent_for_ext_core(~(js.get_literal()), ext_idx, core, num_marks);
+                process_antecedent_for_ext_core(~(js.get_literal()), num_marks);
                 break;
             case justification::CLAUSE: {
                 clause & c = get_clause(js);
@@ -2782,25 +2673,17 @@ namespace sat {
                         i = 1;
                     }
                     else {
-                        process_antecedent_for_ext_core(~c[0], ext_idx, core, num_marks);
+                        process_antecedent_for_ext_core(~c[0], num_marks);
                         i = 2;
                     }
                 }
                 unsigned sz = c.size();
                 for (; i < sz; i++)
-                    process_antecedent_for_ext_core(~c[i], ext_idx, core, num_marks);
+                    process_antecedent_for_ext_core(~c[i], num_marks);
                 break;
             }
             case justification::EXT_JUSTIFICATION: {
-                if (js.get_ext_justification_idx() == ext_idx) {
-                    process_antecedent_for_ext_core(consequent, ext_idx, core, num_marks);
-                }
-                else {
-                    fill_ext_antecedents(consequent, js, false);
-                    for (literal l : m_ext_antecedents) {
-                        process_antecedent_for_ext_core(~l, ext_idx, core, num_marks);
-                    }
-                }
+                process_antecedent_for_ext_core(consequent, num_marks);
                 break;
             }
             default:
@@ -2810,9 +2693,12 @@ namespace sat {
         return true;
     }
 
-    // resolve until all literals have ext_justification of justification index
-    // ext_idx
-    bool solver::resolve_conflict_for_ext_core(literal_vector& core, ext_justification_idx ext_idx) {
+    // resolve until all literals have reason ext_justification
+    // Store conflict clause in m_ext_core
+    // return false if conflict depends on decisions (i.e. not ext_justification)
+    // in this case, m_ext_core contains the decision literal
+    bool solver::resolve_conflict_for_ext_core() {
+        SASSERT(m_ext_core != nullptr);
         bool unique_max = false;
         m_conflict_lvl = get_max_lvl(m_not_l, m_conflict, unique_max);
 
@@ -2832,7 +2718,7 @@ namespace sat {
               tout << "\n";
               tout << "conflict level: " << m_conflict_lvl << "\n";);
 
-        core.reset();
+        m_ext_core->reset();
         SASSERT(m_unmark.empty());
         DEBUG_CODE({
                 for (literal lit : m_trail) {
@@ -2848,22 +2734,24 @@ namespace sat {
             TRACE("sat", tout << "not_l: " << m_not_l << "\n";
                   display_justification(tout, js) << "\n";);
             // either mark m_not_l and increase num_marks or add m_not_l to core
-            VERIFY(process_consequent_for_ext_core(m_not_l, ext_idx, js, core, num_marks));
+            VERIFY(process_consequent_for_ext_core(m_not_l, js, num_marks));
             // process ~m_not_l
             consequent = ~m_not_l;
+            SASSERT(!m_conflict.is_ext_justification());
             js = m_conflict;
         }
-    
-        SASSERT(!m_conflict.is_ext_justification());
+
+        SASSERT(!js.is_ext_justification());
         int idx = skip_literals_above_conflict_level();
         bool exists_ext_core;
         do {
-            exists_ext_core = process_consequent_for_ext_core(consequent, ext_idx, js, core, num_marks);
-            if (consequent != null_literal) num_marks--;
+            exists_ext_core = process_consequent_for_ext_core(consequent, js, num_marks);
             if (!exists_ext_core) {
                 reset_unmark(0);
+                m_unresolvable = true;
                 return false;
             }
+            if (consequent != null_literal) num_marks--;
             while (idx > 0) {
                 consequent = m_trail[idx--];
                 if (is_marked(consequent.var()))
@@ -3110,6 +2998,9 @@ namespace sat {
         auto idx = js.get_ext_justification_idx();
         m_ext_antecedents.reset();
         m_ext->get_antecedents(consequent, idx, m_ext_antecedents, probing);
+        if (!probing && m_ext_antecedents.size() == 0) {
+            m_unresolvable = true;
+        }
     }
 
     bool solver::is_two_phase() const {
@@ -3820,6 +3711,7 @@ namespace sat {
         unsigned new_lvl = scope_lvl() - num_scopes;
         scope & s        = m_scopes[new_lvl];
         m_inconsistent   = false; // TBD: use model seems to make this redundant: s.m_inconsistent;
+        m_unresolvable   = false;
         unassign_vars(s.m_trail_lim, new_lvl);
         for (bool_var v : m_vars_to_free)
             m_case_split_queue.del_var_eh(v);

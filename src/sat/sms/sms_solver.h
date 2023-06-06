@@ -6,6 +6,8 @@
 #include "sat/sat_extension.h"
 #include "sat/sat_solver.h"
 #include "sat/sat_types.h"
+#include "util/debug.h"
+#include "util/lbool.h"
 #include "util/memory_manager.h"
 #include "util/params.h"
 #include "util/sat_literal.h"
@@ -17,21 +19,21 @@ namespace sat {
     {                                                                   \
         TRACE("satmodsat",                                              \
               tout << "solver" << m_name << " " << m_mode << " "        \
-              << m_search_lvl << " " << m_validate_lvl << " " << s;);   \
+              << m_spec_lvl << " " << m_search_lvl << " " << m_solver->scope_lvl() << " " << s;);   \
     }
 
 #define dbg_print_stat(s, t)                                            \
     {                                                                   \
         TRACE("satmodsat", tout << "solver" << m_name << " "            \
-              << m_mode << " " << m_search_lvl << " " <<                \
-              m_validate_lvl << " " << s << " " << t;);                 \
+              << m_mode << " " << m_spec_lvl << " " <<                \
+              m_search_lvl << " " << m_solver->scope_lvl() << " " << s << " " << t;);                 \
     }
 
 #define dbg_print_lit(s, l)                                             \
     {                                                                   \
         TRACE("satmodsat",tout << "solver" << m_name << " "             \
-              << m_mode << " " << m_search_lvl << " "                   \
-              << m_validate_lvl << " " << s;                            \
+              << m_mode << " " << m_spec_lvl << " "                   \
+              << m_search_lvl << " " << m_solver->scope_lvl() << " " << s;                            \
             if (l.sign()) {                                             \
                 tout << " -" << expr_ref(get_expr(l.var()), m);         \
             } else {                                                    \
@@ -41,7 +43,7 @@ namespace sat {
 
 #define dbg_print_lv(s, lv) {                                           \
     TRACE("satmodsat", tout << "solver" << m_name << " " << m_mode      \
-          << " " << m_search_lvl << " " << m_validate_lvl               \
+          << " " << m_spec_lvl << " " << m_search_lvl << " " << m_solver->scope_lvl()              \
           << " " << s;                                                  \
           for (literal l : lv) {                                        \
               if (l.sign()) {                                           \
@@ -56,7 +58,7 @@ namespace sat {
 #define PSOLVER_EXT_IDX 1
 #define UNDEF_EXT_IDX 2
 
-enum sms_mode { FINISHED, PROPAGATE, LOOKAHEAD, VALIDATE, SEARCH };
+enum sms_mode { FINISHED, PROPAGATE, SEARCH };
 
 inline std::ostream &operator<<(std::ostream &out, const sms_mode m) {
     switch (m) {
@@ -64,10 +66,6 @@ inline std::ostream &operator<<(std::ostream &out, const sms_mode m) {
         return out << "PROPAGATE MODE";
     case SEARCH:
         return out << "SEARCH MODE";
-    case LOOKAHEAD:
-        return out << "LOOKAHEAD MODE";
-    case VALIDATE:
-        return out << "VALIDATE MODE";
     case FINISHED:
         return out << "FINISHED MODE";
     default:
@@ -83,7 +81,7 @@ class sms_solver : public extension {
     expr_ref_vector m_var2expr;
     bool_vector m_shared;
     svector<unsigned> m_preferred;
-    literal_vector m_ext_clause;
+    literal_vector* m_ext_clause;
     sms_solver *m_pSolver;
     sms_solver *m_nSolver;
     solver* m_validator;
@@ -91,12 +89,9 @@ class sms_solver : public extension {
     // Might be useful for conflict analysis
     size_t m_tx_idx;
     bool m_construct_itp;
-    unsigned m_full_assignment_lvl;
-    literal_vector *m_core;
-    literal_vector m_asserted;
     sms_mode m_mode;
     bool m_exiting;
-    unsigned m_search_lvl, m_validate_lvl;
+    unsigned m_search_lvl, m_spec_lvl;
     svector<justification> m_replay_just;
     literal m_next_lit;
     bool m_unsat;
@@ -140,13 +135,15 @@ class sms_solver : public extension {
     sms_solver(ast_manager &am, symbol const &name, int id, const params_ref p)
         : extension(name, id), m(am), m_var2expr(m),
           m_pSolver(nullptr), m_nSolver(nullptr), m_tx_idx(0),
-          m_construct_itp(false), m_full_assignment_lvl(0), m_core(nullptr),
-          m_mode(SEARCH), m_exiting(false), m_search_lvl(0), m_validate_lvl(0),
+          m_construct_itp(false),
+          m_mode(SEARCH), m_exiting(false), m_search_lvl(0), m_spec_lvl(0),
           m_next_lit(null_literal), m_unsat(false), m_itp(nullptr) {
         update_params(p);
         m_validator = alloc(solver, p, m.limit());
+        m_ext_clause = alloc(literal_vector);
     }
         void validate(literal_vector cls) {
+            return;
             DEBUG_CODE(
                 literal_vector neg;
                 for (auto l : cls) neg.push_back(~l);
@@ -157,6 +154,7 @@ class sms_solver : public extension {
     ~sms_solver() {
       m_out->flush();
       dealloc(m_validator);
+      dealloc(m_ext_clause);
     }
         ext_justification_idx get_ext_justification_idx() const { return m_id; }
     void drat_dump_ext_unit(literal, ext_justification_idx);
@@ -167,32 +165,36 @@ class sms_solver : public extension {
     void dump(unsigned sz, literal const* lc, status st) override;
     void dump_clause(unsigned sz, literal const* lc);
     void drat_dump_cp(literal_vector const&, ext_justification_idx);    
-    bool is_unsat() const { return m_unsat; }
-    literal_vector const &get_asserted() { return m_asserted; }
-    void set_next_decision(literal l) { m_next_lit = l; }
-    literal get_next_decision() { return m_next_lit; }
+    bool is_unsat() const { return m_solver->at_base_lvl(); }
+    bool unresolvable() const { return m_solver->unresolvable(); }
+    void set_unresolvable() { m_solver->set_unresolvable(); }
+
+    void set_next_lit(literal l) { m_next_lit = l; }
+    void reset_next_decision() { m_next_lit = null_literal; }
     unsigned get_search_lvl() const { return m_search_lvl; }
     unsigned get_scope_lvl() const { return m_solver->scope_lvl(); }
-    unsigned get_validate_lvl() const { return m_validate_lvl; }
+
+    // all decisions before lvl are treated as assumptions
     void set_search_mode(unsigned lvl) {
-        set_mode(SEARCH);
+        m_mode = SEARCH;
         m_search_lvl = lvl;
+        m_solver->set_ext_assumption_lvl(lvl);
     }
-    void set_validate_mode(unsigned s_lvl, unsigned v_lvl) {
-        set_mode(VALIDATE);
-        m_search_lvl = s_lvl;
-        m_validate_lvl = v_lvl;
+
+    // when refining, solver backjumps to m_spec_lvl
+    void set_spec_lvl(unsigned lvl) {
+        m_spec_lvl = lvl;
     }
-    void reset_asserted() { m_asserted.reset(); }
+
     sms_mode get_mode() { return m_mode; }
-    void set_mode(sms_mode m) { m_mode = m; m_search_lvl = 0; m_validate_lvl = 0; }
+    void set_prop_mode() { m_mode = PROPAGATE; m_search_lvl = 0; }
+    void set_fin_mode() { m_mode = FINISHED; m_search_lvl = 0; }
     void set_conflict(sms_solver* solver);
     void handle_mode_transition();
-    lbool resolve_conflict() override;
-    void pop_reinit() override;
+    // void pop_reinit() override;
     void construct_itp() { m_construct_itp = true; }
-    void set_pSolver(sms_solver *p) { m_pSolver = p; }
-    void set_nSolver(sms_solver *n) { m_nSolver = n; }
+    void set_pSolver(sms_solver *p) { m_pSolver = p; p->set_core(m_ext_clause); }
+    void set_nSolver(sms_solver *n) { m_nSolver = n; n->set_core(m_ext_clause); }
     bool get_ext_reason(literal, literal_vector &);
     bool get_reason_final(literal_vector &, ext_justification_idx);
     void get_antecedents(literal, ext_justification_idx, literal_vector &,
@@ -216,8 +218,10 @@ class sms_solver : public extension {
     void push() override;
     void pop(unsigned) override;
     void pop_from_other(unsigned);
-    bool propagate();
-    void set_core(literal_vector &c) { m_core = &c; }
+    void pop_no_reinit(unsigned);
+    void pop_reinit() override;
+    bool propagate(sms_solver*);
+    void set_core(literal_vector *c) { m_solver->set_ext_core(c); }
     bool switch_to_lam();
     void resolve_all_ext_unit_lits();
     void process_antecedents_for_ext_unit(justification js, literal l, literal_vector& todo);
@@ -246,7 +250,7 @@ class sms_solver : public extension {
     }
 
     check_result check() override;
-    bool modular_solve();
+    lbool modular_solve(unsigned lvl);
     void add_clause_expr(expr *fml);
     void addShared(expr_ref_vector const &vars) {
         unsigned v;
@@ -335,8 +339,6 @@ class satmodsatcontext {
         m_stream = alloc(std::ofstream, dratFile.str(), std::ios_base::out);
         a->init_drat(m_stream);
         b->init_drat(m_stream);
-        a->set_nSolver(b);
-        b->set_pSolver(a);
         params_ref pa(p), pb(p);
         pa.set_sym("drat.file", dratFilea);
         m_satA = alloc(solver, pa, m.limit());
@@ -344,9 +346,11 @@ class satmodsatcontext {
         pb.set_sym("drat.file", dratFileb);
         m_satB = alloc(solver, pb, m.limit());
         m_satB->set_extension(m_solverB);
+        a->set_nSolver(b);
+        b->set_pSolver(a);
         b->construct_itp();
-        b->set_mode(SEARCH);
-        a->set_mode(PROPAGATE);
+        b->set_search_mode(0);
+        a->set_prop_mode();
     }
     ~satmodsatcontext() {
         dealloc(m_satA);
@@ -364,9 +368,11 @@ class satmodsatcontext {
 
         bool solve() {
             sms_solver *b = static_cast<sms_solver *>(m_solverB);
-            if (!b->modular_solve()) {
+            lbool res = b->modular_solve(0);
+            if (res == l_false) {
                 return false;
             }
+            SASSERT(res == l_true);
             return true;
         }
 

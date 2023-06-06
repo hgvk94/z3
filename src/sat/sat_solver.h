@@ -116,6 +116,7 @@ namespace sat {
         mus                     m_mus;           // MUS for minimal core extraction
         binspr                  m_binspr;
         bool                    m_inconsistent;
+        bool                    m_unresolvable;
         bool                    m_searching;
         // A conflict is usually a single justification. That is, a justification
         // for false. If m_not_l is not null_literal, then m_conflict is a
@@ -166,6 +167,7 @@ namespace sat {
         var_queue               m_case_split_queue;
         unsigned                m_qhead;
         unsigned                m_scope_lvl;
+        unsigned                m_ext_assumption_lvl;
         unsigned                m_search_lvl;
         ema                     m_fast_glue_avg;
         ema                     m_slow_glue_avg;
@@ -194,6 +196,7 @@ namespace sat {
         literal_set             m_assumption_set;   // set of enabled assumptions
         literal_set             m_ext_assumption_set;   // set of enabled assumptions
         literal_vector          m_core;             // unsat core
+        literal_vector*          m_ext_core;        // core for ext_assumptions
 
         unsigned                m_par_id;        
         unsigned                m_par_limit_in;
@@ -357,14 +360,18 @@ namespace sat {
         //
         // -----------------------
     public:
-      // search only above decision level lvl
-      bool search_above(unsigned lvl);
+      // search only above decision level m_ext_assumption_lvl
+      lbool search_above();
       literal const get_m_not_l() { return m_not_l; }
       justification const get_conflict() { return m_conflict; }
       literal_vector const& get_m_lemma() { return m_lemma; }
       void reset_m_lemma() { m_lemma.reset(); }
-      // is the state inconsistent?
+        // is the state inconsistent?
         bool inconsistent() const { return m_inconsistent; }
+
+        // solver cannot resolve the current conflict
+        bool unresolvable() const { return m_unresolvable; }
+        void set_unresolvable() { m_unresolvable = true; m_inconsistent = true; }
 
         // number of variables and clauses
         unsigned num_vars() const { return m_justification.size(); }
@@ -383,6 +390,7 @@ namespace sat {
         bool get_phase(bool_var b) { return m_phase.get(b, false); }
         void move_to_front(bool_var b);
         unsigned scope_lvl() const { return m_scope_lvl; }
+        void set_ext_assumption_lvl(unsigned lvl) { m_ext_assumption_lvl = lvl; }
         unsigned search_lvl() const { return m_search_lvl; }
         bool  at_search_lvl() const { return m_scope_lvl == m_search_lvl; }
         bool  at_base_lvl() const { return m_scope_lvl == 0; }
@@ -407,14 +415,14 @@ namespace sat {
                 m_justification[l.var()] = j;
         }
         void update_assign_uncond(literal l, justification j) { m_justification[l.var()] = j; }
-        bool resolve_conflict_for_ext_core(literal_vector&, ext_justification_idx);
-        bool check_resolvable(unsigned& c_lvl, unsigned& bj_lvl, literal_vector& lemma, literal_vector& ext_units);
+        bool resolve_conflict_for_ext_core();
         void assign_unit(literal l) { assign(l, justification(0)); }
         void assign_scoped(literal l) { assign(l, justification(scope_lvl())); }
         void assign_core(literal l, justification jst);
         void set_conflict(justification c, literal not_l);
         void set_conflict(justification c) { set_conflict(c, null_literal); }
         void set_conflict() { set_conflict(justification(0)); }
+        void set_ext_core(literal_vector* p) { m_ext_core = p; }
         lbool status(clause const & c) const;        
         clause_offset get_offset(clause const & c) const { return cls_allocator().get_offset(&c); }
 
@@ -686,8 +694,8 @@ protected:
             return lvl1;
         }
         unsigned get_max_lvl(literal consequent, justification js, bool& unique_max);
-        void process_antecedent_for_ext_core(literal, ext_justification_idx, literal_vector&, unsigned&);
-      bool process_consequent_for_ext_core(literal, ext_justification_idx, justification const&, literal_vector&, unsigned&);
+        void process_antecedent_for_ext_core(literal,  unsigned&);
+        bool process_consequent_for_ext_core(literal, justification const&, unsigned&);
         void process_antecedent(literal antecedent, unsigned & num_marks);
         void resolve_conflict_for_unsat_core();
         void process_antecedent_for_unsat_core(literal antecedent);
