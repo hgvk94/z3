@@ -66,8 +66,8 @@ namespace sat {
         m_case_split_queue(m_activity),
         m_qhead(0),
         m_scope_lvl(0),
-        m_search_lvl(0),
         m_ext_assumption_lvl(0),
+        m_search_lvl(0),
         m_fast_glue_avg(),
         m_slow_glue_avg(),
         m_fast_glue_backup(),
@@ -405,7 +405,7 @@ namespace sat {
             return;
         extension::scoped_drating _sd(*m_ext.get());
         if (j.get_kind() == justification::EXT_JUSTIFICATION) 
-            fill_ext_antecedents(lit, j, true);
+            fill_ext_antecedents(lit, j, false);
         else 
             m_drat.add(lit, m_searching);       
     }
@@ -2998,9 +2998,6 @@ namespace sat {
         auto idx = js.get_ext_justification_idx();
         m_ext_antecedents.reset();
         m_ext->get_antecedents(consequent, idx, m_ext_antecedents, probing);
-        if (!probing && m_ext_antecedents.size() == 0) {
-            m_unresolvable = true;
-        }
     }
 
     bool solver::is_two_phase() const {

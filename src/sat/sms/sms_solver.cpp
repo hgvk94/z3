@@ -39,7 +39,7 @@ void sms_solver::dump(unsigned sz, literal const *lc, status st) {
 void sms_solver::dump_clause(unsigned sz, literal const* lc) {
   SASSERT(m_drating);
   if (sz == 0) {
-    (*m_out) << "\n";
+    (*m_out) << null_literal << "\n";
       return;
   }
   unsigned i = 0;
@@ -91,7 +91,7 @@ unsigned sms_solver::place_highest_dl_at_start(literal_vector& cls) {
     }
     std::swap(cls[0], cls[hl]);
     unsigned bj_lvl = 0;
-    for (auto i = 1; i < cls.size(); i++) {
+    for (unsigned i = 1; i < cls.size(); i++) {
         bj_lvl = std::max(bj_lvl, m_solver->lvl(cls[i]));
     }
     return bj_lvl;
@@ -106,12 +106,12 @@ clause* sms_solver::learn_clause(literal_vector& cls) {
     return  m_solver->mk_clause(cls.size(), cls.data(), sat::status::redundant());
 }
 
-// learn clause (l || antecedent) from external solver idx
+// learn clause (antecedent ==> l) from external solver idx
 void sms_solver::learn_clause_and_update_justification(
     literal l, literal_vector const &antecedent, ext_justification_idx idx) {
     literal_vector cls;
     cls.push_back(l);
-    for (auto a : antecedent) cls.push_back(a);
+    for (auto a : antecedent) cls.push_back(~a);
     if (idx == NSOLVER_EXT_IDX) m_nSolver->validate(cls);
     else m_pSolver->validate(cls);
 
@@ -153,14 +153,16 @@ void sms_solver::get_antecedents(literal l, ext_justification_idx idx,
       if (m_drating) drat_dump_cp(cls, idx);
       return;
     }
-    bool res = idx == NSOLVER_EXT_IDX ? m_nSolver->get_ext_reason(l, r) : m_pSolver->get_ext_reason(l, r);
+    sms_solver* s = idx == NSOLVER_EXT_IDX ? m_nSolver : m_pSolver;
+    bool res = s->get_ext_reason(l, r);
+    // when probing is true, sat solver is not doing conflict resolution
+    if (probing) return;
     if (!res) {
         if (m_nSolver) m_nSolver->set_next_lit(l);
         else m_next_lit = l;
+        set_unresolvable();
         return;
     }
-    // when probing is true, sat solver is not doing conflict resolution
-    if (probing) return;
     learn_clause_and_update_justification(l, r, idx);
 }
 
@@ -210,7 +212,8 @@ bool sms_solver::get_ext_reason(literal l, literal_vector &rc) {
                 break;
             }
             case justification::EXT_JUSTIFICATION: {
-                rc.push_back(~t);
+                SASSERT(l.var() != t.var());
+                rc.push_back(t);
                 break;
             }
             default: {
@@ -291,15 +294,14 @@ bool sms_solver::unit_propagate() {
 
 // propagate called by s
 bool sms_solver::propagate(sms_solver* s) {
-    if (get_mode() == FINISHED) return true;
     SASSERT(get_mode() != SEARCH);
     // all shared variables are already on the trail.
     // update m_solver->m_qhead
     if (m_solver->propagate(false)) return true;
     dbg_print("getting final ext reason for conflict");
     if (m_solver->resolve_conflict_for_ext_core()) {
-        dbg_print_lv("final reason is", *m_ext_clause);
-        validate(*m_ext_clause);
+        dbg_print_lv("final reason is", *m_solver->get_ext_core());
+        validate(*m_solver->get_ext_core());
         return false;
     }
     dbg_print("cannot express conflict in terms of shared vars");
@@ -307,8 +309,8 @@ bool sms_solver::propagate(sms_solver* s) {
     SASSERT(!m_nSolver);
     SASSERT(get_mode() == PROPAGATE);
     SASSERT(s->get_mode() == SEARCH);
-    SASSERT(m_ext_clause->size() == 1);
-    m_next_lit = m_ext_clause->get(0);
+    SASSERT(m_solver->get_ext_core()->size() == 1);
+    m_next_lit = m_solver->get_ext_core()->get(0);
     return false;
 }
 
@@ -431,7 +433,9 @@ bool sms_solver::decide(bool_var &next, lbool &phase) {
             SASSERT(m_solver->value(next) == l_undef);
             return true;
         }
+        default: UNREACHABLE();
     }
+    UNREACHABLE();
 }
 
 
@@ -486,6 +490,7 @@ void sms_solver::pop(unsigned num_scopes) {
     dbg_print_stat("popping", num_scopes);
     unsigned bj_lvl = m_solver->scope_lvl() - num_scopes;
     if (!m_exiting &&  bj_lvl < m_search_lvl) {
+        dbg_print("backjumping below search lvl, will trigger reinit");
         m_replay_assign.reset();
         m_replay_just.reset();
         m_solver->save_trail(bj_lvl, m_search_lvl, m_replay_assign, m_replay_just);
@@ -496,20 +501,45 @@ void sms_solver::pop(unsigned num_scopes) {
     if (m_nSolver) m_nSolver->pop_from_other(num_scopes);
 }
 
-void sms_solver::pop_reinit() {
-    if (m_exiting) return;
+// add literals below level lvl in m_replay_assign to the trail
+// use s to synchronize decision levels
+void sms_solver::reinit_saved_trail(sms_solver* s, unsigned lvl = UINT32_MAX) {
+    SASSERT(s->get_mode() == SEARCH);
     for(unsigned i = 0, sz = m_replay_assign.size(); i < sz; i++) {
         justification js = m_replay_just[i];
         literal l = m_replay_assign[i];
-        while (m_solver->scope_lvl() < js.level()) m_solver->push();
+        if (js.level() < m_solver->scope_lvl()) {
+            SASSERT(m_solver->value(l) != l_undef);
+            continue;
+        }
+        if(js.level() > lvl) break;
+        dbg_print_stat("re-initializing at lvl", js.level());
+        SASSERT(m_solver->scope_lvl() == s->get_scope_lvl());
+        while (m_solver->scope_lvl() < js.level()) s->push_from_other();
         // The trail is unordered. So we could be assigning literals at a
         // lower level than solver->scope_lvl()
         m_solver->assign(l, js);
-        m_solver->propagate(false);
-        if (m_solver->inconsistent()) {
-            return;
-        }
+        // synchronize trail manually since assign does not have a callback
+        s->assign_from_other(l, this);
+        SASSERT(!m_solver->inconsistent());
     }
+}
+void sms_solver::pop_reinit() {
+    if (m_exiting) return;
+    if(get_mode() != SEARCH) return;
+    // Reinitialize all decisions made by this solver before it speculated
+    // Happens only during validation
+    if (m_pSolver && m_solver->scope_lvl() < m_spec_lvl) {
+        SASSERT(m_pSolver->get_mode() == FINISHED);
+        reinit_saved_trail(this, m_spec_lvl);
+    }
+
+    // Reinitialize all decisions in the other solver, when it was in SEARCH mode
+    if (m_pSolver) m_pSolver->reinit_saved_trail(this, m_search_lvl);
+    else m_nSolver->reinit_saved_trail(this, m_search_lvl);
+
+    //reinit all decisions made in the current SEARCH mode
+    reinit_saved_trail(this);
 }
 
 void sms_solver::pop_no_reinit(unsigned num_scopes) {
@@ -556,6 +586,13 @@ void sms_solver::process_antecedents_for_ext_unit(justification js, literal l, l
         default:
             SASSERT(false);
         }
+}
+
+lbool sms_solver::resolve_conflict() {
+    if (m_solver->at_base_lvl()) {
+        resolve_all_ext_unit_lits();
+    }
+    return l_undef;
 }
 
 void sms_solver::resolve_all_ext_unit_lits() {
@@ -606,9 +643,6 @@ lbool sms_solver::modular_solve(unsigned lvl) {
         set_spec_lvl(0);
         r = m_solver->search_above();
         SASSERT(r != l_undef);
-    }
-    if (m_solver->at_base_lvl()) {
-          resolve_all_ext_unit_lits();
     }
     dbg_print_stat("finished modular solve with", r);
     return r;

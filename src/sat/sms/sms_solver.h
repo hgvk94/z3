@@ -173,6 +173,7 @@ class sms_solver : public extension {
     void reset_next_decision() { m_next_lit = null_literal; }
     unsigned get_search_lvl() const { return m_search_lvl; }
     unsigned get_scope_lvl() const { return m_solver->scope_lvl(); }
+    void reinit_saved_trail(sms_solver* s, unsigned lvl);
 
     // all decisions before lvl are treated as assumptions
     void set_search_mode(unsigned lvl) {
@@ -220,6 +221,7 @@ class sms_solver : public extension {
     void pop_from_other(unsigned);
     void pop_no_reinit(unsigned);
     void pop_reinit() override;
+    lbool resolve_conflict() override;
     bool propagate(sms_solver*);
     void set_core(literal_vector *c) { m_solver->set_ext_core(c); }
     bool switch_to_lam();

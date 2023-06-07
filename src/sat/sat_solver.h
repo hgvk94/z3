@@ -423,6 +423,7 @@ namespace sat {
         void set_conflict(justification c) { set_conflict(c, null_literal); }
         void set_conflict() { set_conflict(justification(0)); }
         void set_ext_core(literal_vector* p) { m_ext_core = p; }
+        literal_vector* get_ext_core() { return m_ext_core; }
         lbool status(clause const & c) const;        
         clause_offset get_offset(clause const & c) const { return cls_allocator().get_offset(&c); }
 
@@ -657,12 +658,14 @@ public:
 
         unsigned compute_conflict_lvl() { bool u; return get_max_lvl(m_not_l, m_conflict, u); }
         unsigned get_conflict_lvl() { return m_conflict_lvl; }
+
+        //save all decisions on the trail in levels [start, end]
         void save_trail(unsigned start, unsigned end, literal_vector& t, svector<justification>& j) {
                 literal l;
                 unsigned i = start == 0 ? 0 : m_scopes[start].m_trail_lim;
                 for(; i < m_trail.size(); i++) {
                         l = m_trail[i];
-                        if(lvl(l) >= start && lvl(l) <= end && m_justification[l.var()].is_ext_justification()) {
+                        if(lvl(l) >= start && lvl(l) <= end && m_justification[l.var()].is_none()) {
                                 t.push_back(l);
                                 j.push_back(m_justification[l.var()]);
                         }

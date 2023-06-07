@@ -79,6 +79,7 @@ namespace {
 }
 void sms_proof_itp::log_clause(status s, unsigned int sz, const literal *c) {
     literal_vector l(sz, c);
+    if (sz == 0) l.push_back(null_literal);
     m_trail.push_back({s, l});
 }
 
