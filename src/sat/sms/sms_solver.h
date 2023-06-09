@@ -173,7 +173,7 @@ class sms_solver : public extension {
     void reset_next_decision() { m_next_lit = null_literal; }
     unsigned get_search_lvl() const { return m_search_lvl; }
     unsigned get_scope_lvl() const { return m_solver->scope_lvl(); }
-    void reinit_saved_trail(sms_solver* s, unsigned lvl);
+    void reinit_decision(sms_solver* s, unsigned lvl);
 
     // all decisions before lvl are treated as assumptions
     void set_search_mode(unsigned lvl) {
@@ -182,6 +182,7 @@ class sms_solver : public extension {
         m_solver->set_ext_assumption_lvl(lvl);
     }
 
+    void save_trail(unsigned start, unsigned end);
     // when refining, solver backjumps to m_spec_lvl
     void set_spec_lvl(unsigned lvl) {
         m_spec_lvl = lvl;
@@ -190,7 +191,7 @@ class sms_solver : public extension {
     sms_mode get_mode() { return m_mode; }
     void set_prop_mode() { m_mode = PROPAGATE; m_search_lvl = 0; }
     void set_fin_mode() { m_mode = FINISHED; m_search_lvl = 0; }
-    void set_conflict(sms_solver* solver);
+    void learn_ext_core(sms_solver* solver);
     void handle_mode_transition();
     // void pop_reinit() override;
     void construct_itp() { m_construct_itp = true; }
@@ -205,7 +206,7 @@ class sms_solver : public extension {
                                           literal_vector const &antecedent, ext_justification_idx id);
     bool decide(bool_var &, lbool &) override;
     bool get_case_split(bool_var &, lbool &) override;
-    unsigned place_highest_dl_at_start(literal_vector& cls);
+    unsigned place_highest_dl_at_start(literal_vector& cls,  bool& unique_max);
     clause* learn_clause(literal_vector& cls);
     bool unit_propagate() override;
     void asserted(literal) override;

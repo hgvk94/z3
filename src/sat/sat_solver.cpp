@@ -405,7 +405,7 @@ namespace sat {
             return;
         extension::scoped_drating _sd(*m_ext.get());
         if (j.get_kind() == justification::EXT_JUSTIFICATION) 
-            fill_ext_antecedents(lit, j, false);
+            fill_ext_antecedents(lit, j, true);
         else 
             m_drat.add(lit, m_searching);       
     }
