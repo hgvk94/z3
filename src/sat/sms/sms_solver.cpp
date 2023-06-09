@@ -353,6 +353,11 @@ void sms_solver::assign_from_other(literal l, sms_solver* solver) {
         if (m_solver->scope_lvl() == 0) {
             //the solver might change justifications at level 0
             m_solver->update_assign_uncond(l, js);
+            if (m_drating) {
+                literal_vector cl;
+                cl.push_back(l);
+                drat_dump_cp(cl, solver->get_id());
+            }
         }
     }
     return;
