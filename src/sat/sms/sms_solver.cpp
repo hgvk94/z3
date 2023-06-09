@@ -620,12 +620,6 @@ void sms_solver::process_antecedents_for_ext_unit(justification js, literal l, l
         }
 }
 
-lbool sms_solver::resolve_conflict() {
-    if (m_solver->at_base_lvl()) {
-        resolve_all_ext_unit_lits();
-    }
-    return l_undef;
-}
 
 void sms_solver::resolve_all_ext_unit_lits() {
     literal_vector todo;

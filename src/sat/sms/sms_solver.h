@@ -222,7 +222,6 @@ class sms_solver : public extension {
     void pop_from_other(unsigned);
     void pop_no_reinit(unsigned);
     void pop_reinit() override;
-    lbool resolve_conflict() override;
     bool propagate(sms_solver*);
     void set_core(literal_vector *c) { m_solver->set_ext_core(c); }
     bool switch_to_lam();
