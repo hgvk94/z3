@@ -13,6 +13,8 @@
 #include "util/sat_literal.h"
 #include "util/symbol.h"
 #include "util/vector.h"
+#include "sat/sms/sms_validator.h"
+
 namespace sat {
 
 #define dbg_print(s)                                                    \
@@ -84,7 +86,7 @@ class sms_solver : public extension {
     literal_vector* m_ext_clause;
     sms_solver *m_pSolver;
     sms_solver *m_nSolver;
-    solver* m_validator;
+    sms_validator* m_validator;
     // Keep track of how many times literals have been exchanged.
     // Might be useful for conflict analysis
     size_t m_tx_idx;
@@ -107,7 +109,7 @@ class sms_solver : public extension {
         unsigned v;
         SASSERT(!m_expr2var.find(n, v));
         v = m_solver->add_var(true);
-        m_validator->add_var(true);
+        m_validator->add_var(get_id());
         TRACE("satmodsat",
               tout << "adding var " << v << " for expr " << expr_ref(n, m););
         m_expr2var.insert(n, v);
@@ -139,21 +141,10 @@ class sms_solver : public extension {
           m_mode(SEARCH), m_exiting(false), m_search_lvl(0), m_spec_lvl(0),
           m_next_lit(null_literal), m_unsat(false), m_itp(nullptr) {
         update_params(p);
-        m_validator = alloc(solver, p, m.limit());
         m_ext_clause = alloc(literal_vector);
     }
-        void validate(literal_vector cls) {
-            return;
-            DEBUG_CODE(
-                literal_vector neg;
-                for (auto l : cls) neg.push_back(~l);
-                if (!m_validator->check(neg)) {
-                    IF_VERBOSE(0, verbose_stream() << "cannot validate" << cls;);
-                });
-        }
     ~sms_solver() {
       m_out->flush();
-      dealloc(m_validator);
       dealloc(m_ext_clause);
     }
         ext_justification_idx get_ext_justification_idx() const { return m_id; }
@@ -270,7 +261,7 @@ class sms_solver : public extension {
         m_picked.resize(m_preferred.size());
     }
         void set_itp(sms_proof_itp* itp) { m_itp = itp; }
-
+        void set_validator(sms_validator* v) { m_validator = v; }
         bool has_var(expr* e, bool_var& v) { return m_expr2var.find(e, v); }
         bool has_expr(bool_var v, expr* &e) {
             if (m_var2expr.size() <= v) return false;
@@ -306,6 +297,7 @@ class satmodsatcontext {
     solver *m_satA;
     solver *m_satB;
     sms_proof_itp* m_itp;
+    sms_validator* m_validator;
     void add_cnf_expr_to_solver(extension *s, expr_ref fml);
     std::ostream* m_stream;
   public:
@@ -326,7 +318,7 @@ class satmodsatcontext {
         sms_solver *b = static_cast<sms_solver *>(m_solverB);
         b->addPreferred(prefB);
     }
-    satmodsatcontext(ast_manager &am, params_ref const& p) : m(am), m_itp(nullptr) {
+    satmodsatcontext(ast_manager &am, params_ref const& p) : m(am), m_itp(nullptr), m_validator(nullptr) {
         symbol dratFile = symbol("smsdrat.txt");
         symbol dratFilea = symbol("smsdrata.txt");
         symbol dratFileb = symbol("smsdratb.txt");
@@ -353,11 +345,15 @@ class satmodsatcontext {
         b->construct_itp();
         b->set_search_mode(0);
         a->set_prop_mode();
+        m_validator = alloc(sms_validator, m);
+        a->set_validator(m_validator);
+        b->set_validator(m_validator);
     }
     ~satmodsatcontext() {
         dealloc(m_satA);
         dealloc(m_satB);
         dealloc(m_stream);
+        dealloc(m_validator);
     }
 
         void set_itp(sms_proof_itp* itp) {

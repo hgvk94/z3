@@ -34,6 +34,7 @@ void sms_solver::dump(unsigned sz, literal const *lc, status st) {
   }
   dump_clause(sz, lc);
   if (m_itp) m_itp->log_clause(st, sz, lc);
+  m_validator->validate(st, sz, lc, get_id());
 }
 
 void sms_solver::dump_clause(unsigned sz, literal const* lc) {
@@ -112,7 +113,6 @@ unsigned sms_solver::place_highest_dl_at_start(literal_vector& cls, bool& unique
 clause* sms_solver::learn_clause(literal_vector& cls) {
     dbg_print_lv("learning lemma", cls);
     literal_vector tmp(cls);
-    m_validator->add_clause(tmp.size(), tmp.data(), sat::status::asserted());
     DEBUG_CODE(unsigned i = 1; for (; i < cls.size(); i++) SASSERT(m_solver->lvl(cls[i]) <= m_solver->lvl(cls[0])););
     return  m_solver->mk_clause(cls.size(), cls.data(), sat::status::redundant());
 }
@@ -123,8 +123,6 @@ void sms_solver::learn_clause_and_update_justification(
     literal_vector cls;
     cls.push_back(l);
     for (auto a : antecedent) cls.push_back(~a);
-    if (idx == NSOLVER_EXT_IDX) m_nSolver->validate(cls);
-    else m_pSolver->validate(cls);
 
     if (m_drating) drat_dump_cp(cls, idx);
     bool unique_max = false;
@@ -247,7 +245,6 @@ void sms_solver::learn_ext_core(sms_solver* s) {
     unsigned bjlvl = place_highest_dl_at_start(*m_ext_clause, unique_max);
     pop_no_reinit(m_solver->scope_lvl() - bjlvl);
     if(m_ext_clause->size() > 0) {
-        s->validate(*m_ext_clause);
         dbg_print_lv("other solver unsat with current trail, learning lemma ", *m_ext_clause);
     }
     else dbg_print("other solver unsat");
@@ -315,7 +312,6 @@ bool sms_solver::propagate(sms_solver* s) {
     dbg_print("getting final ext reason for conflict");
     if (m_solver->resolve_conflict_for_ext_core()) {
         dbg_print_lv("final reason is", *m_solver->get_ext_core());
-        validate(*m_solver->get_ext_core());
         return false;
     }
     dbg_print("cannot express conflict in terms of shared vars");
@@ -329,10 +325,6 @@ bool sms_solver::propagate(sms_solver* s) {
 }
 
 void sms_solver::asserted(literal l) {
-    if (m_solver->lvl(l) == 0) {
-        literal_vector uc; uc.push_back(l);
-        validate(uc);
-    }
     // synchronize assignments on shared variables
     if (m_shared[l.var()]) {
         sms_solver* s = m_pSolver ? m_pSolver : m_nSolver;
@@ -716,7 +708,6 @@ void sms_solver::add_clause_expr(expr *fml) {
         c.push_back(l);
     }
     m_solver->add_clause(c.size(), c.data(), sat::status::input());
-    m_validator->add_clause(c.size(), c.data(), sat::status::input());
 }
 
 void satmodsatcontext::addA(expr_ref fml) {
