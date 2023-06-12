@@ -46,7 +46,7 @@ namespace sat {
                 s->assign(~lc[i], js);
             }
             bool sat = s->propagate(false);
-            VERIFY(!sat);
+            SASSERT(!sat);
             s->pop(1);
             literal_vector tmp(sz, lc);
             s->add_clause(sz, tmp.data(), sat::status::asserted());
@@ -83,6 +83,7 @@ namespace sat {
         void validate(status st, unsigned sz, literal const* lc, unsigned id) {
             validator* s = id == NSOLVER_EXT_IDX ? s2 : s1;
             validator* o = id == NSOLVER_EXT_IDX ? s1 : s2;
+            TRACE("satmodsat_validate", tout << "adding clause to " << id << "\n";);
             switch (st.m_st) {
                 case status::st::input:
                     s->add(sz, lc);
@@ -104,6 +105,7 @@ namespace sat {
                     s->add(sz, lc);
                     break;
                 case status::st::deleted:
+                    SASSERT(false);
                     break;
             }
             m_trail.push_back(st);

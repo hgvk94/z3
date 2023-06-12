@@ -236,8 +236,10 @@ bool sms_solver::get_ext_reason(literal l, literal_vector &rc) {
 }
 
 
-// Assume that s is unsat with unsat core m_ext_clause
-// Learn clause m_ext_clause and backjump to the highest level s.t. m_ext_clause is not false
+// Assume that s is unsat with unsat core m_ext_clause Learn clause m_ext_clause
+// and backjump to the highest level s.t. m_ext_clause is not false
+// The clause is not necessarily asserting at the current decision level
+// however, it blocks the current decision trail
 void sms_solver::learn_ext_core(sms_solver* s) {
     SASSERT(s != this);
     ext_justification_idx idx = s->get_ext_justification_idx();
