@@ -82,8 +82,8 @@ void sms_solver::drat_dump_ext_unit(literal l, ext_justification_idx id) {
 // returns level at which cls is asserting
 // return whether there are more than one literal at highest dl
 unsigned sms_solver::place_highest_dl_at_start(literal_vector& cls, bool& unique_max) {
+    unique_max = true;
     if (cls.size() <= 1) {
-        unique_max = true;
         return 0;
     }
     unsigned hl = 0, hli = 0, lvl;
@@ -98,23 +98,26 @@ unsigned sms_solver::place_highest_dl_at_start(literal_vector& cls, bool& unique
     unsigned bj_lvl = 0;
     for (unsigned i = 1; i < cls.size(); i++) {
         lvl = m_solver->lvl(cls[i]);
-        unique_max |=  lvl == hl;
+        unique_max &=  lvl < hl;
         if (lvl < hl)
             bj_lvl = std::max(bj_lvl, lvl);
     }
-    // if all literals in the clause are at the same decision level, backjump to
-    // one level below
+    // if there is no literal below hl, backjump to hl - 1
     if (!unique_max && bj_lvl == 0 && hl > 1)
         bj_lvl = hl - 1;
     return bj_lvl;
 }
 
-// add cls to solver, return ptr to the new clause
-clause* sms_solver::learn_clause(literal_vector& cls) {
+// add cls to solver, return ptr to the new clause if its an asserting clause,
+// learn it exactly as a sat solver would if not, learn it like a theory lemma
+// The difference is that, if the clause is not marked as an asserting clause,
+// literals that have been assigned values might also be picked as watched
+// literals
+clause* sms_solver::learn_clause(literal_vector& cls, bool is_asserting) {
     dbg_print_lv("learning lemma", cls);
     literal_vector tmp(cls);
     DEBUG_CODE(unsigned i = 1; for (; i < cls.size(); i++) SASSERT(m_solver->lvl(cls[i]) <= m_solver->lvl(cls[0])););
-    return  m_solver->mk_clause(cls.size(), cls.data(), sat::status::redundant());
+    return  m_solver->mk_clause(cls.size(), cls.data(), is_asserting? sat::status::redundant() : sat::status::th(true, get_id()));
 }
 
 // learn clause (antecedent ==> l) from external solver idx
@@ -127,7 +130,7 @@ void sms_solver::learn_clause_and_update_justification(
     if (m_drating) drat_dump_cp(cls, idx);
     bool unique_max = false;
     place_highest_dl_at_start(cls, unique_max);
-    clause* c = learn_clause(cls);
+    clause* c = learn_clause(cls, true);
     justification js = m_solver->get_justification(l);
     justification njs(js.level());
     switch (cls.size()) {
@@ -190,7 +193,7 @@ bool sms_solver::get_ext_reason(literal l, literal_vector &rc) {
         todo.pop_back();
         if (mark.contains(t.var())) continue;
         mark.insert(t.var());
-        dbg_print_lit("Fetching reason for", t);
+        dbg_print_lit("Fetching reason for", t, m_solver->lvl(t));
         justification js = m_solver->get_justification(t);
         TRACE("satmodsat", m_solver->display_justification(tout, js););
         switch (js.get_kind()) {
@@ -243,19 +246,13 @@ bool sms_solver::get_ext_reason(literal l, literal_vector &rc) {
 void sms_solver::learn_ext_core(sms_solver* s) {
     SASSERT(s != this);
     ext_justification_idx idx = s->get_ext_justification_idx();
-    bool unique_max = false;
-    unsigned bjlvl = place_highest_dl_at_start(*m_ext_clause, unique_max);
+    bool is_asserting = false, is_unsat = m_solver->at_base_lvl();
+    unsigned bjlvl = place_highest_dl_at_start(*m_ext_clause, is_asserting);
+    dbg_print_stat("jumping to level", bjlvl);
     pop_no_reinit(m_solver->scope_lvl() - bjlvl);
-    if(m_ext_clause->size() > 0) {
-        dbg_print_lv("other solver unsat with current trail, learning lemma ", *m_ext_clause);
-    }
-    else dbg_print("other solver unsat");
+    CTRACE("satmodsat", m_ext_clause->size() > 0, dbg_print_lv("other solver unsat with current trail, learning lemma ", *m_ext_clause););
     if (m_drating) drat_dump_cp(*m_ext_clause, idx);
-    clause *c = learn_clause(*m_ext_clause);
-    if (m_ext_clause->size() > 0 &&  m_solver->value(m_ext_clause->get(0)) == l_false) {
-        SASSERT(m_solver->at_base_lvl());
-        m_solver->set_conflict();
-    }
+    clause *c = learn_clause(*m_ext_clause, is_asserting);
     // // learning clauses cause propagation and conflict
     // if (m_solver->inconsistent()) return;
     // SASSERT(m_ext_clause->size() > 0);

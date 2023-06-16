@@ -31,16 +31,16 @@ namespace sat {
               m_search_lvl << " " << m_solver->scope_lvl() << " " << s << " " << t;);                 \
     }
 
-#define dbg_print_lit(s, l)                                             \
+#define dbg_print_lit(s, l, u)                                          \
     {                                                                   \
         TRACE("satmodsat",tout << "solver" << m_name << " "             \
-              << m_mode << " " << m_spec_lvl << " "                   \
+              << m_mode << " " << m_spec_lvl << " "                     \
               << m_search_lvl << " " << m_solver->scope_lvl() << " " << s;                            \
             if (l.sign()) {                                             \
                 tout << " -" << expr_ref(get_expr(l.var()), m);         \
             } else {                                                    \
                 tout << " " << expr_ref(get_expr(l.var()), m);          \
-            };);                                                        \
+            } tout << " " << u;);                                       \
     }
 
 #define dbg_print_lv(s, lv) {                                           \
@@ -198,7 +198,7 @@ class sms_solver : public extension {
     bool decide(bool_var &, lbool &) override;
     bool get_case_split(bool_var &, lbool &) override;
     unsigned place_highest_dl_at_start(literal_vector& cls,  bool& unique_max);
-    clause* learn_clause(literal_vector& cls);
+    clause* learn_clause(literal_vector& cls, bool is_asserting = false);
     bool unit_propagate() override;
     void asserted(literal) override;
     unsigned get_lit_lvl(literal l) {

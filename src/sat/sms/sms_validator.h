@@ -105,7 +105,6 @@ namespace sat {
                     s->add(sz, lc);
                     break;
                 case status::st::deleted:
-                    SASSERT(false);
                     break;
             }
             m_trail.push_back(st);
