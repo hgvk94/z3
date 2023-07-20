@@ -303,6 +303,7 @@ void sms_solver::asserted(literal l) {
     if (m_shared[l.var()]) {
         sms_solver* s = m_pSolver ? m_pSolver : m_nSolver;
         s->assign_from_other(l, this);
+        m_made_shared_assignment = true;
     }
 }
 
@@ -361,6 +362,18 @@ bool sms_solver::get_case_split(bool_var &next, lbool &phase) {
     return false;
 }
 
+bool sms_solver::exit_speculation() {
+    return get_mode() == SEARCH && m_nSolver && m_nSolver->get_mode() == PROPAGATE && m_made_shared_assignment;
+}
+
+literal sms_solver::get_refine_lit() {
+    for (unsigned i = m_solver->trail_size(); i >= 0; i--) {
+        literal l = m_solver->trail_literal(i);
+        if (is_shared(l.var()) && m_solver->lvl(l) >= m_spec_lvl) return l;
+    }
+    UNREACHABLE();
+}
+
 bool sms_solver::decide(bool_var &next, lbool &phase) {
     SASSERT(get_mode() == SEARCH);
     if (m_next_lit != null_literal) {
@@ -373,6 +386,12 @@ bool sms_solver::decide(bool_var &next, lbool &phase) {
     }
     // assign preferred vars
     if (pick_random_unassigned(next, phase)) return true;
+    if (m_nSolver && exit_speculation()) {
+        literal l = get_refine_lit();
+        m_nSolver->set_next_lit(l);
+        set_unresolvable();
+        return false;
+    }
     //never enter speculative execution
     if (m_lam_switch == 0 || !m_pSolver) return false;
     //all preferred variables have been picked, speculate

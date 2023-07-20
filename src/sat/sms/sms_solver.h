@@ -101,6 +101,7 @@ class sms_solver : public extension {
     literal_vector m_replay_assign;
     std::ostream* m_out;
     sms_proof_itp* m_itp;
+    bool m_made_shared_assignment;
 
     // if m_lam_switch is 0, we never speculate
     unsigned m_lam_switch;
@@ -133,6 +134,9 @@ class sms_solver : public extension {
     }
     //pick a random unassigned variable from m_preferred
     bool pick_random_unassigned(bool_var &next, lbool &phase);
+    //exit speculation
+    bool exit_speculation();
+    literal get_refine_lit();
   public:
     sms_solver(ast_manager &am, symbol const &name, int id, const params_ref p)
         : extension(name, id), m(am), m_var2expr(m),
@@ -171,6 +175,7 @@ class sms_solver : public extension {
         m_mode = SEARCH;
         m_search_lvl = lvl;
         m_solver->set_ext_assumption_lvl(lvl);
+        m_made_shared_assignment = false;
     }
 
     void save_trail(unsigned start, unsigned end);
@@ -180,8 +185,8 @@ class sms_solver : public extension {
     }
 
     sms_mode get_mode() { return m_mode; }
-    void set_prop_mode() { m_mode = PROPAGATE; m_search_lvl = 0; }
-    void set_fin_mode() { m_mode = FINISHED; m_search_lvl = 0; }
+    void set_prop_mode() { m_mode = PROPAGATE; m_search_lvl = 0; m_made_shared_assignment = false; }
+    void set_fin_mode() { m_mode = FINISHED; m_search_lvl = 0; m_made_shared_assignment = false; }
     void learn_ext_core(sms_solver* solver);
     void handle_mode_transition();
     // void pop_reinit() override;
