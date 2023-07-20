@@ -272,6 +272,7 @@ class sms_solver : public extension {
     bool_var get_var(expr *e) {
         bool_var v;
         bool found = m_expr2var.find(e, v);
+        (void) found;
         SASSERT(found);
         return v;
     }
@@ -306,7 +307,7 @@ class satmodsatcontext {
         sms_solver *b = static_cast<sms_solver *>(m_solverB);
         a->addShared(vars);
         b->addShared(vars);
-        for (expr *e : vars) { SASSERT(a->get_var(e) == b->get_var(e)); }
+        DEBUG_CODE(for (expr *e : vars) { SASSERT(a->get_var(e) == b->get_var(e)); };);
         a->print_var_map();
         b->print_var_map();
     }

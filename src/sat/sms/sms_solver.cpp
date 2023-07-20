@@ -638,8 +638,7 @@ bool sat_mod_sat::solve(expr_ref A, expr_ref B, expr_ref_vector &shared, expr_re
           tout << "A: " << mk_pp(A, m) << " B: " << mk_pp(B, m) << "\n";);
     init(A, B, shared, prefA, prefB);
     bool res = m_solver.solve();
-    const char *s = res ? "satisfiable" : "unsatisfiable";
-    TRACE("satmodsat", tout << "final result is " << s;);
+    TRACE("satmodsat", tout << "final result is " << (res ? "satisfiable" : "unsatisfiable") << "\n";);
     return res;
 }
 
