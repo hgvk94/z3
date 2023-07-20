@@ -246,38 +246,13 @@ bool sms_solver::get_ext_reason(literal l, literal_vector &rc) {
 void sms_solver::learn_ext_core(sms_solver* s) {
     SASSERT(s != this);
     ext_justification_idx idx = s->get_ext_justification_idx();
-    bool is_asserting = false, is_unsat = m_solver->at_base_lvl();
+    bool is_asserting = false;
     unsigned bjlvl = place_highest_dl_at_start(*m_ext_clause, is_asserting);
     dbg_print_stat("jumping to level", bjlvl);
     pop_no_reinit(m_solver->scope_lvl() - bjlvl);
     CTRACE("satmodsat", m_ext_clause->size() > 0, dbg_print_lv("other solver unsat with current trail, learning lemma ", *m_ext_clause););
     if (m_drating) drat_dump_cp(*m_ext_clause, idx);
-    clause *c = learn_clause(*m_ext_clause, is_asserting);
-    // // learning clauses cause propagation and conflict
-    // if (m_solver->inconsistent()) return;
-    // SASSERT(m_ext_clause->size() > 0);
-    // justification js(bjlvl);
-    // // force conflict
-    // switch (m_ext_clause->size()) {
-    // case 0:
-    //     //special case when one solver is unsat, learning it already made solver
-    //     //inconsistent
-    //     UNREACHABLE();
-    // case 1:
-    //     // if its a unit clause, it cannot be simplified further, so no need for
-    //     //conflict analysis
-    //     SASSERT(m_solver->scope_lvl() == 0);
-    //     break;
-    // case 2:
-    //     // if its a binary clause, it cannot be simplified further
-    //     break;
-    // default:
-    //     clause_offset co = m_solver->get_offset(*c);
-    //     js = justification(bjlvl, co);
-    //     m_solver->set_conflict(js);
-    //     break;
-    // }
-    // dbg_print_stat("analyzing conflict at level", bjlvl);
+    learn_clause(*m_ext_clause, is_asserting);
 }
 
 /*
@@ -574,71 +549,6 @@ void sms_solver::pop_no_reinit(unsigned num_scopes) {
 /*
 ** ---- END ---- Methods for synchronizing decision levels
  */
-
-
-void sms_solver::process_antecedents_for_ext_unit(justification js, literal l, literal_vector& todo) {
-    literal_vector rc;
-    switch (js.get_kind()) {
-        case justification::NONE:
-            SASSERT(js.level() == 0);
-            break;
-        case justification::BINARY:
-            SASSERT(m_solver->lvl(js.get_literal()) == 0);
-            todo.push_back(js.get_literal());
-            break;
-        case justification::CLAUSE: {
-            clause &c = m_solver->get_clause(js);
-            unsigned i = 0;
-            unsigned sz = c.size();
-            for (i = 0; i < sz; i++) {
-                SASSERT(m_solver->lvl(c[i]) == 0);
-                if (c[i].var() != l.var()) todo.push_back(c[i]);
-            }
-            break;
-        }
-        case justification::EXT_JUSTIFICATION: {
-            rc.reset();
-            get_antecedents(~l, js.get_ext_justification_idx(), rc, false);
-            unsigned i = 0;
-            for (i = 0; i < rc.size(); i++) {
-                SASSERT(m_solver->lvl(rc[i]) == 0);
-                if (rc[i].var() != l.var()) todo.push_back(rc[i]);
-            }
-            break;
-        }
-        default:
-            SASSERT(false);
-        }
-}
-
-
-void sms_solver::resolve_all_ext_unit_lits() {
-    literal_vector todo;
-    literal l = m_solver->get_m_not_l();
-
-    if (l != null_literal) {
-        justification js = m_solver->get_conflict();
-        process_antecedents_for_ext_unit(js,  l, todo);
-    }
-    todo.push_back(l);
-    justification js(0);
-    int_hashtable<int_hash, default_eq<int>> mark;
-    while (!todo.empty()) {
-        l = todo.back();
-        todo.pop_back();
-        if (mark.contains(l.var())) continue;
-        mark.insert(l.var());
-        if (l == null_literal) {
-            js = m_solver->get_conflict();
-            if (js.is_ext_justification()) continue;
-        }
-        else {
-            js = m_solver->get_justification(l);
-            SASSERT(m_solver->lvl(l) == 0);
-        }
-        process_antecedents_for_ext_unit(js,  l, todo);
-    }
-}
 
 
 // MAIN METHOD
