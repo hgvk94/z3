@@ -132,11 +132,8 @@ class sms_solver : public extension {
     void update_params(params_ref const & p) {
         m_lam_switch = p.get_uint("lam_switch", 1);
     }
-    //pick a random unassigned variable from m_preferred
-    bool pick_random_unassigned(bool_var &next, lbool &phase);
     //exit speculation
-    bool exit_speculation();
-    literal get_refine_lit();
+    bool exit_speculation(literal& l);
   public:
     sms_solver(ast_manager &am, symbol const &name, int id, const params_ref p)
         : extension(name, id), m(am), m_var2expr(m),
@@ -165,8 +162,9 @@ class sms_solver : public extension {
     bool is_unsat() const { return m_solver->at_base_lvl(); }
     bool unresolvable() const { return m_solver->unresolvable(); }
     void set_unresolvable() { m_solver->set_unresolvable(); }
+    void reset_unresolvable() { m_solver->reset_unresolvable(); }
 
-    void set_next_lit(literal l) { m_next_lit = l; }
+    void set_next_lit(literal l) { dbg_print_stat("refining on lit ", l) m_next_lit = l; }
     void reset_next_decision() { m_next_lit = null_literal; }
     unsigned get_search_lvl() const { return m_search_lvl; }
     unsigned get_scope_lvl() const { return m_solver->scope_lvl(); }
@@ -203,7 +201,6 @@ class sms_solver : public extension {
     learn_clause_and_update_justification(literal l,
                                           literal_vector const &antecedent, ext_justification_idx id);
     bool decide(bool_var &, lbool &) override;
-    bool get_case_split(bool_var &, lbool &) override;
     unsigned place_highest_dl_at_start(literal_vector& cls,  bool& unique_max);
     clause* learn_clause(literal_vector& cls, bool is_asserting = false);
     bool unit_propagate() override;
