@@ -2736,11 +2736,9 @@ namespace sat {
             VERIFY(process_consequent_for_ext_core(m_not_l, js, num_marks));
             // process ~m_not_l
             consequent = ~m_not_l;
-            SASSERT(!m_conflict.is_ext_justification());
             js = m_conflict;
         }
 
-        SASSERT(!js.is_ext_justification());
         int idx = skip_literals_above_conflict_level();
         bool exists_ext_core;
         do {

@@ -371,6 +371,7 @@ namespace sat {
 
         // solver cannot resolve the current conflict
         bool unresolvable() const { return m_unresolvable; }
+        void reset_unresolvable() { m_unresolvable = false; }
         void set_unresolvable() { m_unresolvable = true; m_inconsistent = true; }
 
         // number of variables and clauses

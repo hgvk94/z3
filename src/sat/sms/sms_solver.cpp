@@ -88,7 +88,11 @@ unsigned sms_solver::place_highest_dl_at_start(literal_vector& cls, bool& unique
     }
     unsigned hl = 0, hli = 0, lvl;
     for (unsigned i = 0; i < cls.size(); i++) {
-        lvl = m_solver->lvl(cls[i]);
+        //if cls[i] is unassigned, it has to be assigned in the other solver.
+        //This only happens when the other solver hits a conflict during propagation
+        SASSERT(m_solver->value(cls[i]) != l_undef || (m_nSolver && m_nSolver->get_lit_lvl(cls[i]) == m_solver->scope_lvl()) ||
+                (m_pSolver && m_pSolver->get_lit_lvl(cls[i]) == m_solver->scope_lvl()));
+        lvl = m_solver->value(cls[i]) == l_undef ? m_solver->scope_lvl() : m_solver->lvl(cls[i]);
         if (hl < lvl) {
             hli = i;
             hl = lvl;
@@ -97,7 +101,7 @@ unsigned sms_solver::place_highest_dl_at_start(literal_vector& cls, bool& unique
     std::swap(cls[0], cls[hli]);
     unsigned bj_lvl = 0;
     for (unsigned i = 1; i < cls.size(); i++) {
-        lvl = m_solver->lvl(cls[i]);
+        lvl = m_solver->value(cls[i]) == l_undef ? m_solver->scope_lvl() : m_solver->lvl(cls[i]);
         unique_max &=  lvl < hl;
         if (lvl < hl)
             bj_lvl = std::max(bj_lvl, lvl);
@@ -116,7 +120,7 @@ unsigned sms_solver::place_highest_dl_at_start(literal_vector& cls, bool& unique
 clause* sms_solver::learn_clause(literal_vector& cls, bool is_asserting) {
     dbg_print_lv("learning lemma", cls);
     literal_vector tmp(cls);
-    DEBUG_CODE(unsigned i = 1; for (; i < cls.size(); i++) SASSERT(m_solver->lvl(cls[i]) <= m_solver->lvl(cls[0])););
+    DEBUG_CODE(unsigned i = 1; for (; i < cls.size() && is_asserting; i++) SASSERT(m_solver->lvl(cls[i]) <= m_solver->lvl(cls[0])););
     return  m_solver->mk_clause(cls.size(), cls.data(), is_asserting? sat::status::redundant() : sat::status::th(true, get_id()));
 }
 
@@ -172,15 +176,15 @@ void sms_solver::get_antecedents(literal l, ext_justification_idx idx,
     if (probing) return;
     if (!res) {
         if (m_nSolver) m_nSolver->set_next_lit(l);
-        else m_next_lit = l;
+        else set_next_lit(l);
         set_unresolvable();
         return;
     }
     learn_clause_and_update_justification(l, r, idx);
 }
 
-// get reason for l when solver is not in a conflicting state
-// returns false if l is caused by a decision
+// get reason clause rc for l s.t. each literal of rc is propagated from an
+// extenal solver. returns false if l is caused by a decision
 bool sms_solver::get_ext_reason(literal l, literal_vector &rc) {
     SASSERT(m_shared[l.var()]);
     literal_vector todo;
@@ -294,7 +298,7 @@ bool sms_solver::propagate(sms_solver* s) {
     SASSERT(get_mode() == PROPAGATE);
     SASSERT(s->get_mode() == SEARCH);
     SASSERT(m_solver->get_ext_core()->size() == 1);
-    m_next_lit = m_solver->get_ext_core()->get(0);
+    set_next_lit(m_solver->get_ext_core()->get(0));
     return false;
 }
 
@@ -310,12 +314,10 @@ void sms_solver::asserted(literal l) {
 void sms_solver::assign_from_other(literal l, sms_solver* solver) {
     SASSERT(this != solver);
     lbool v = m_solver->value(l);
-    //Solvers cannot disagree on assignments to shared variables
-    SASSERT(v != l_false);
     if (v == l_undef) {
         justification js =
             justification::mk_ext_justification(solver->get_lit_lvl(l), solver->get_id());
-        dbg_print_lit("assigning from other", l);
+        dbg_print_lit("assigning from other", l, solver->get_lit_lvl(l));
         m_solver->assign(l, js);
         if (m_solver->scope_lvl() == 0) {
             //the solver might change justifications at level 0
@@ -326,6 +328,9 @@ void sms_solver::assign_from_other(literal l, sms_solver* solver) {
                 drat_dump_cp(cl, solver->get_id());
             }
         }
+    }
+    else if (v == l_false) {
+        m_solver->set_conflict(justification::mk_ext_justification(solver->get_lit_lvl(l), solver->get_id()), ~l);
     }
     return;
 }
@@ -400,6 +405,15 @@ bool sms_solver::decide(bool_var &next, lbool &phase) {
             set_spec_lvl(0);
             //pSolver unsat with current decisions, learn lemma
             learn_ext_core(m_pSolver);
+            m_solver->propagate(false);
+            if (m_solver->inconsistent()) return false;
+            m_solver->push();
+            if (m_solver->value(m_ext_clause->get(0)) == l_undef) {
+                next = m_ext_clause->get(0).var();
+                phase = m_ext_clause->get(0).sign() ? l_true : l_false;
+                return true;
+            }
+            SASSERT(m_solver->value(next) == l_undef);
             return false;
         }
         case l_undef: {
@@ -409,8 +423,10 @@ bool sms_solver::decide(bool_var &next, lbool &phase) {
             m_pSolver->reset_unresolvable();
             literal l = m_next_lit;
             SASSERT(l != null_literal);
-            m_next_lit = null_literal;
-            pop_no_reinit(m_solver->scope_lvl() - m_solver->lvl(l));
+            set_next_lit(null_literal);
+            //backjumpt to spec_lvl and make a decision
+            pop_no_reinit(m_solver->scope_lvl() - m_spec_lvl);
+            m_solver->push();
             next = l.var();
             phase = l.sign() ? l_true : l_false;
             SASSERT(m_solver->value(next) == l_undef);
