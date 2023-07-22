@@ -86,6 +86,7 @@ namespace sat {
 	  scoped_drating(extension& e) :ext(e), m_prev(ext.m_drating) { ext.m_drating = true;  }
 	  ~scoped_drating() { ext.m_drating = m_prev;  }
         };
+        virtual bool is_in_ext_core(bool_var v) { return false; }
         virtual void init_search() {}
         virtual bool propagated(sat::literal l, sat::ext_constraint_idx idx) { UNREACHABLE(); return false; }
         virtual bool unit_propagate() = 0;        

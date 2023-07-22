@@ -2632,16 +2632,15 @@ namespace sat {
 
     void solver::process_antecedent_for_ext_core(literal antecedent, unsigned & num_marks) {
         bool_var var     = antecedent.var();
-        justification js = m_justification[var];
         SASSERT(var < num_vars());
         TRACE("sat", tout << antecedent << " " << (is_marked(var)?"+":"-") << "\n";);
         if (!is_marked(var)) {
             mark(var);
             m_unmark.push_back(var);
-            SASSERT(js.level() <= m_conflict_lvl);
-            if (js.is_ext_justification())
+            SASSERT(lvl(var) <= m_conflict_lvl);
+            if (m_ext->is_in_ext_core(var))
                 m_ext_core->push_back(~antecedent);
-            else if (js.level() != 0)
+            else if (lvl(var) != 0)
                 num_marks++;
         }
     }

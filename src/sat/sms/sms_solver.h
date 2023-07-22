@@ -157,6 +157,8 @@ class sms_solver : public extension {
         m_drating = true;
         m_out = s;
     }
+
+    bool is_in_ext_core(bool_var v) override { return m_shared[v]; }
     void dump(unsigned sz, literal const* lc, status st) override;
     void dump_clause(unsigned sz, literal const* lc);
     void drat_dump_cp(literal_vector const&, ext_justification_idx);    
