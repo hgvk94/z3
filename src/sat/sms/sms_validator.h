@@ -46,6 +46,7 @@ namespace sat {
                 s->assign(~lc[i], js);
             }
             bool sat = s->propagate(false);
+            CTRACE("satmodsat_validate", sat, s->display_assignment(tout));
             SASSERT(!sat);
             s->pop(1);
             literal_vector tmp(sz, lc);
