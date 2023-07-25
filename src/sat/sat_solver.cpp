@@ -1660,6 +1660,7 @@ namespace sat {
         if (m_ext && m_ext->decide(next, phase)) {
             if (used_queue)
                 m_case_split_queue.unassign_var_eh(next_lit.var());
+            if (next == null_bool_var) return false;
             next_lit = literal(next, false);
         }
         if (inconsistent()) return true;
