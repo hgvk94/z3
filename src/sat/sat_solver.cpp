@@ -2494,6 +2494,8 @@ namespace sat {
                 fill_ext_antecedents(consequent, js, false);
                 if (unresolvable()) {
                     TRACE("sat", tout << "cannot resolve ext literal: " << consequent << "\n";);
+                    m_ext_core->reset();
+                    m_ext_core->push_back(consequent);
                     m_lemma.reset();
                     SASSERT(m_inconsistent);
                     return l_undef;
@@ -2656,8 +2658,8 @@ namespace sat {
         switch (js.get_kind()) {
             case justification::NONE: {
                 if (js.level() == 0) return true;
-                m_ext_core->reset();
-                m_ext_core->push_back(consequent);
+                SASSERT(!m_ext_core->empty());
+                m_ext_core->resize(1);
                 return false;
             }
             case justification::BINARY:
