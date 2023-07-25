@@ -204,8 +204,8 @@ bool sms_solver::get_ext_reason(literal l, literal_vector &rc) {
             case justification::NONE: {
                 if (js.level() != 0) {
                     // Decision variables involved in the conflict, exit without any justification
-                    // SASSERT(m_finished_lookahead);
                     rc.reset();
+                    dbg_print_stat("get reason failed for ", t);
                     return false;
                 }
                 break;
