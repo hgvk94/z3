@@ -2749,9 +2749,9 @@ namespace sat {
                 return false;
             }
             if (consequent != null_literal) num_marks--;
-            while (idx > 0) {
+            while (idx >= 0) {
                 consequent = m_trail[idx--];
-                if (is_marked(consequent.var()))
+                if (is_marked(consequent.var()) && !m_ext->is_in_ext_core(consequent.var()))
                     break;
             }
             js = m_justification[consequent.var()];
