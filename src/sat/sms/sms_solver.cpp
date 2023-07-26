@@ -275,7 +275,12 @@ bool sms_solver::unit_propagate() {
     sms_solver* p = m_pSolver ? m_pSolver : m_nSolver;
     if (!p->propagate(this)) {
         if (p->unresolvable()) set_unresolvable();
-        else learn_ext_core(p);
+        else {
+            learn_ext_core(p);
+            //recurse to propagate on p again.
+            // backjumping does not make qhead == m_trail.size(), propagation does
+            unit_propagate();
+        }
     }
     //the sat solver doesn't use the return value, return anything
     return true;
@@ -369,7 +374,8 @@ bool sms_solver::decide(bool_var &next, lbool &phase) {
     }
     literal l;
     if (m_nSolver && exit_speculation(l)) {
-        m_nSolver->set_next_lit(l);
+        m_solver->get_ext_core()->reset();
+        m_solver->get_ext_core()->push_back(l);
         dbg_print_lit("exiting speculation with refine lit ", l, m_solver->lvl(l););
         set_unresolvable();
         //return true so that the sat solver will unassign next from case_split_queue
@@ -406,6 +412,7 @@ bool sms_solver::decide(bool_var &next, lbool &phase) {
             //pSolver unsat with current decisions, learn lemma
             learn_ext_core(m_pSolver);
             m_solver->propagate(false);
+            unit_propagate();
             if (m_solver->inconsistent()) return false;
             m_solver->push();
             if (m_solver->value(m_ext_clause->get(0)) == l_undef) {
@@ -456,6 +463,8 @@ check_result sms_solver::check() {
     set_search_mode(0);
     //pSolver unsat with current decisions
     learn_ext_core(m_pSolver);
+    m_solver->propagate(false);
+    unit_propagate();
     SASSERT(m_solver->scope_lvl() < full_assign_lvl);
     return check_result::CR_CONTINUE;
 }
@@ -580,7 +589,10 @@ lbool sms_solver::modular_solve(unsigned lvl) {
     lbool r = m_solver->search_above();
     //if modular solve returned unresolvable during validation, try again
     if (r == l_undef && m_pSolver && m_pSolver->get_mode() == FINISHED) {
-        SASSERT(m_next_lit != null_literal);
+        if (m_next_lit == null_literal) {
+            SASSERT(m_solver->get_ext_core()->size() == 1);
+            m_next_lit = m_solver->get_ext_core()->get(0);
+        }
         pop_no_reinit(m_solver->scope_lvl() - m_spec_lvl);
         set_spec_lvl(0);
         m_pSolver->set_prop_mode();
@@ -598,6 +610,11 @@ lbool sms_solver::modular_solve(unsigned lvl) {
         pop_no_reinit(m_solver->scope_lvl() - m_spec_lvl);
         //recurse. Terminates because we learnt an asserting clause at m_pSolver
         modular_solve(0);
+    }
+    //refine using m_ext_core
+    if (r == l_undef && m_nSolver) {
+        SASSERT(m_nSolver->get_mode() == PROPAGATE);
+        m_nSolver->set_next_lit(m_solver->get_ext_core()->get(0));
     }
     dbg_print_stat("finished modular solve with", r);
     return r;
