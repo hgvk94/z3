@@ -402,6 +402,7 @@ bool sms_solver::decide(bool_var &next, lbool &phase) {
             m_solver->push();
             if (m_solver->value(next) == l_undef) return false;
             next = m_solver->next_var();
+            if (next == null_bool_var) return true;
             phase = m_solver->guess(next) ? l_true : l_false;
             return true;
         }
