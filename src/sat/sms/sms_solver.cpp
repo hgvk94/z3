@@ -351,6 +351,7 @@ void sms_solver::assign_from_other(literal l, sms_solver* solver) {
 //exit speculation by refining on l
 bool sms_solver::exit_speculation(literal &l) {
     l = null_literal;
+    if (m_lam_switch == 0) return false;
     if (get_mode() != SEARCH || !m_nSolver || m_nSolver->get_mode() != PROPAGATE || m_solver->trail_size() == 0)
         return false;
     if (m_solver->scope_lvl() <= m_spec_lvl + 3) return false;
