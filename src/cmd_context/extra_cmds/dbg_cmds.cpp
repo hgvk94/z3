@@ -345,13 +345,12 @@ class satmodsat_cmd : public cmd {
     expr* fml_A;
     expr* fml_B;
     ptr_vector<expr> m_shared_vars;
-    ptr_vector<expr> m_pref_varsA, m_pref_varsB;
     unsigned m_arg_index;
 public:
     satmodsat_cmd():cmd("satmodsat") {}
-    char const * get_usage() const override { return "(<vars>) <expA> <expB> (<prefvarsA>) (<prefvarsB>) where expA and expB are boolean CNF formulas, <vars>, <prefvarsA>, and <prefvarsB> are variables"; }
+    char const * get_usage() const override { return "(<vars>) <expA> <expB> where expA and expB are boolean CNF formulas, <vars> is a subset of variables shared between the formulas"; }
     char const * get_descr(cmd_context & ctx) const override { return "perform SAT mod SAT solving"; }
-    unsigned get_arity() const override { return 5; }
+    unsigned get_arity() const override { return 3; }
     cmd_arg_kind next_arg_kind(cmd_context& ctx) const override {
         switch (m_arg_index) {
             case 0:
@@ -360,10 +359,11 @@ public:
             case 2:
                 return CPK_EXPR;
             default:
+                SASSERT(false);
                 return CPK_EXPR_LIST;
         }
     }
-    void prepare(cmd_context & ctx) override { m_arg_index = 0; m_shared_vars.reset(), m_pref_varsA.reset(); m_pref_varsB.reset(); }
+    void prepare(cmd_context & ctx) override { m_arg_index = 0; m_shared_vars.reset(); }
     void set_next_arg(cmd_context& ctx, expr * arg) override {
         if (m_arg_index == 1) fml_A = arg;
         else if (m_arg_index == 2) fml_B = arg;
@@ -372,31 +372,17 @@ public:
     }
     void set_next_arg(cmd_context & ctx, unsigned num, expr * const * ts) override {
         if (m_arg_index == 0) m_shared_vars.append(num, ts);
-        else if (m_arg_index == 3) m_pref_varsA.append(num, ts);
-        else if (m_arg_index == 4) m_pref_varsB.append(num, ts);
         else SASSERT(false);
         m_arg_index++;
     }
   void execute(cmd_context & ctx) override { 
     ast_manager& m = ctx.m();
-    expr_ref_vector vars(m), pref_varsA(m), pref_varsB(m);
+    expr_ref_vector vars(m);
     for (expr* v : m_shared_vars) {
       if (!m.is_bool(v) || !is_uninterp_const(v)) {
           throw cmd_exception("invalid variable argument. Uninterpreted variable expected");
       }
       vars.push_back(to_app(v));
-    }
-    for (expr* v : m_pref_varsA) {
-      if (!m.is_bool(v) || !is_uninterp_const(v)) {
-          throw cmd_exception("invalid pref variable argument");
-      }
-      pref_varsA.push_back(to_app(v));
-    }
-    for (expr* v : m_pref_varsB) {
-      if (!m.is_bool(v) || !is_uninterp_const(v)) {
-          throw cmd_exception("invalid pref variable argument");
-      }
-      pref_varsB.push_back(to_app(v));
     }
     params_ref p =  gparams::get_module("smt");
     p.set_bool("minimize_lemmas", false);
@@ -405,7 +391,7 @@ public:
     sat::sms_proof_itp itp(m, &solver);
     expr_ref fml1(fml_A, m);
     expr_ref fml2(fml_B, m);
-    if (!solver.solve(fml1, fml2, vars, pref_varsA, pref_varsB)) {
+    if (!solver.solve(fml1, fml2, vars)) {
         IF_VERBOSE(0, verbose_stream() << "unsatisfiable\n";);
         expr_ref fml(m);
         itp.interpolate(fml);

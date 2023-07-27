@@ -666,10 +666,10 @@ void satmodsatcontext::add_cnf_expr_to_solver(extension *s, expr_ref fml) {
     for (expr *e : *to_app(fml)) { a->add_clause_expr(e); }
 }
 
-bool sat_mod_sat::solve(expr_ref A, expr_ref B, expr_ref_vector &shared, expr_ref_vector &prefA, expr_ref_vector &prefB) {
+bool sat_mod_sat::solve(expr_ref A, expr_ref B, expr_ref_vector &shared) {
     TRACE("satmodsat",
           tout << "A: " << mk_pp(A, m) << " B: " << mk_pp(B, m) << "\n";);
-    init(A, B, shared, prefA, prefB);
+    init(A, B, shared);
     bool res = m_solver.solve();
     TRACE("satmodsat", tout << "final result is " << (res ? "satisfiable" : "unsatisfiable") << "\n";);
     return res;
@@ -679,12 +679,11 @@ bool sat_mod_sat::solve(expr_ref A, expr_ref B, expr_ref_vector &shared, expr_re
 // That is variable 1 in Solver_A is the same as variable 1 in solver_B
 // This is required to reduce the amount of bookkeeping when exchanging lits and
 // clauses between solvers
-void sat_mod_sat::init(expr_ref A, expr_ref B, expr_ref_vector const &shared, expr_ref_vector const &prefA, expr_ref_vector const &prefB) {
+void sat_mod_sat::init(expr_ref A, expr_ref B, expr_ref_vector const &shared) {
     m_a = A;
     m_b = B;
     m_shared = expr_ref_vector(shared);
     m_solver.addShared(shared);
-    m_solver.addPreferred(prefA, prefB);
     m_solver.addA(m_a);
     m_solver.addB(m_b);
 }
