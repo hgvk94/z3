@@ -9,11 +9,11 @@
 (satmodsat (a b c d)
 	   (and  (or (not f) (not e) a) (or f (not e) a) (or e (not a)) (or e (not b))
 	         (or b (not c) (not d)))
-	   (and (or d) (or a b c) (or (not a))) () ())
+	   (and (or d) (or a b c) (or (not a))))
 
 
 ;; interpolant is (not (and (or (not b) a) (or (not c) b (not d))))
 (satmodsat (a b c d)
 	   (and (or d) (or a b c) (or (not a)))
 	   (and  (or (not f) (not e) a) (or f (not e) a) (or e (not a)) (or e (not b))
-	         (or b (not c) (not d))) () ())
+	         (or b (not c) (not d))))

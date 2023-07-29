@@ -10,6 +10,6 @@
 	   	 (or (not c) d))
 	   (and  (or a b)
 	   	 (or (not a) c)
-		 (or (not b) c)) () ())
+		 (or (not b) c)))
 		 
-(satmodsat (a b c d) (and (or a b) (or (not a) c) (or (not b) c)) (and  (or (not c) (not d)) (or (not c) d)) () ())
+(satmodsat (a b c d) (and (or a b) (or (not a) c) (or (not b) c)) (and  (or (not c) (not d)) (or (not c) d)))

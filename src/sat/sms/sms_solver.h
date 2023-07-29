@@ -14,6 +14,7 @@
 #include "util/symbol.h"
 #include "util/vector.h"
 #include "sat/sms/sms_validator.h"
+#include "sat/sms/sms_proof_trim.h"
 
 namespace sat {
 
@@ -77,6 +78,7 @@ inline std::ostream &operator<<(std::ostream &out, const sms_mode m) {
     return out;
 }
 class sms_proof_itp;
+
 class sms_solver : public extension {
     ast_manager &m;
     obj_map<expr, unsigned> m_expr2var;
@@ -86,6 +88,7 @@ class sms_solver : public extension {
     sms_solver *m_pSolver;
     sms_solver *m_nSolver;
     sms_validator* m_validator;
+    sms_proof_trim* m_proof_trim;
     // Keep track of how many times literals have been exchanged.
     // Might be useful for conflict analysis
     size_t m_tx_idx;
@@ -109,7 +112,8 @@ class sms_solver : public extension {
         unsigned v;
         SASSERT(!m_expr2var.find(n, v));
         v = m_solver->add_var(true);
-        m_validator->add_var(get_id());
+        if (m_validator) m_validator->add_var(get_id());
+        if (m_proof_trim) m_proof_trim->add_var(get_id() - 1);
         TRACE("satmodsat",
               tout << "adding var " << v << " for expr " << expr_ref(n, m););
         m_expr2var.insert(n, v);
@@ -255,6 +259,7 @@ class sms_solver : public extension {
     }
         void set_itp(sms_proof_itp* itp) { m_itp = itp; }
         void set_validator(sms_validator* v) { m_validator = v; }
+        void set_proof_trim(sms_proof_trim* p) { m_proof_trim = p; }
         bool has_var(expr* e, bool_var& v) { return m_expr2var.find(e, v); }
         bool has_expr(bool_var v, expr* &e) {
             if (m_var2expr.size() <= v) return false;
@@ -292,6 +297,7 @@ class satmodsatcontext {
     solver *m_satB;
     sms_proof_itp* m_itp;
     sms_validator* m_validator;
+    sms_proof_trim* m_proof_trim;
     void add_cnf_expr_to_solver(extension *s, expr_ref fml);
     std::ostream* m_stream;
   public:
@@ -335,14 +341,18 @@ class satmodsatcontext {
         b->set_search_mode(0);
         a->set_prop_mode();
         m_validator = alloc(sms_validator, m);
+        m_proof_trim = alloc(sms_proof_trim, p, m);
         a->set_validator(m_validator);
         b->set_validator(m_validator);
+        a->set_proof_trim(m_proof_trim);
+        b->set_proof_trim(m_proof_trim);
     }
     ~satmodsatcontext() {
         dealloc(m_satA);
         dealloc(m_satB);
         dealloc(m_stream);
         dealloc(m_validator);
+        dealloc(m_proof_trim);
     }
 
         void set_itp(sms_proof_itp* itp) {
@@ -357,6 +367,7 @@ class satmodsatcontext {
             sms_solver *b = static_cast<sms_solver *>(m_solverB);
             lbool res = b->modular_solve(0);
             if (res == l_false) {
+                m_proof_trim->trim();
                 return false;
             }
             SASSERT(res == l_true);

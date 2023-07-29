@@ -34,7 +34,8 @@ void sms_solver::dump(unsigned sz, literal const *lc, status st) {
   }
   dump_clause(sz, lc);
   if (m_itp) m_itp->log_clause(st, sz, lc);
-  m_validator->validate(st, sz, lc, get_id());
+  if (m_proof_trim) m_proof_trim->log_clause(st, sz, lc, get_id() - 1);
+  if (m_validator) m_validator->validate(st, sz, lc, get_id());
 }
 
 void sms_solver::dump_clause(unsigned sz, literal const* lc) {

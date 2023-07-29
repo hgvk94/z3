@@ -47,6 +47,7 @@ Revision History:
 #include "sat/sat_parallel.h"
 #include "sat/sat_local_search.h"
 #include "sat/sat_solver_core.h"
+#include "sat/sms/sms_proof_trim.h"
 
 namespace pb {
     class solver;
@@ -240,6 +241,7 @@ namespace sat {
         friend class lut_finder;
         friend class npn3_finder;
         friend class proof_trim;
+        friend class sms_proof_trim;
     public:
         solver(params_ref const & p, reslimit& l);
         ~solver() override;

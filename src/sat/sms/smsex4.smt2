@@ -9,4 +9,4 @@
 (satmodsat (a b)
 	   (and (or c a b) (or (not c) a b))
        (and (or (not a) e f) (or (not a) e (not f)) (or (not a) (not e) f) (or (not a) (not e) (not f))
-       (or (not b) e f) (or (not b) e (not f)) (or (not b) (not e) f) (or (not b) (not e) (not f))) () ())
+       (or (not b) e f) (or (not b) e (not f)) (or (not b) (not e) f) (or (not b) (not e) (not f))))
