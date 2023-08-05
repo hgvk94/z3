@@ -113,7 +113,7 @@ class sms_solver : public extension {
         SASSERT(!m_expr2var.find(n, v));
         v = m_solver->add_var(true);
         if (m_validator) m_validator->add_var(get_id());
-        if (m_proof_trim) m_proof_trim->add_var(get_id() - 1);
+        if (m_proof_trim) m_proof_trim->add_var(get_id() - 1, e);
         TRACE("satmodsat",
               tout << "adding var " << v << " for expr " << expr_ref(n, m););
         m_expr2var.insert(n, v);

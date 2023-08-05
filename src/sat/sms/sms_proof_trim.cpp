@@ -20,36 +20,54 @@ sms_proof_trim::~sms_proof_trim() {
     dealloc(m_solvers[1]);
 }
 
-void sms_proof_trim::add_var(unsigned i) { m_solvers[i]->add_var(true); }
+void sms_proof_trim::add_var(unsigned i, expr_ref t) {
+    unsigned v = m_solvers[i]->add_var(true);
+    if (m_var2Exp.size() <= v) { m_var2Exp.resize(v + 1); }
+    m_var2Exp[v] = t;
+}
 
 void sms_proof_trim::log_clause(status stat, unsigned sz, literal const *c, unsigned idx) {
     SASSERT(idx == NSOLVER_EXT_IDX_TMP || idx == PSOLVER_EXT_IDX_TMP);
-    unsigned i = m_ctrail.size();
-    literal_vector lc(sz);
+    //log copied clauses as learned on the source solver as well
+    if (stat.is_copied()) {
+        log_clause(status::asserted(), sz, c, stat.get_src() - 1);
+    }
+
+    unsigned i = m_ctrail.size(), old_i, hash;
+    literal_vector lc(sz == 0 ? 1 : sz);
     for(unsigned i = 0; i < sz; i++) lc[i] = c[i];
     std::sort(lc.begin(), lc.end());
     solver* s = m_solvers[idx];
     literal l, k;
     clause*  cidx;
-    mark(lc);
+    if (s->inconsistent()) {
+        TRACE("satmodsat", tout << "solver " << idx << " already inconsistent, not adding " << lc << " of status " << stat;);
+        return;
+    }
+    TRACE("satmodsat", tout << "logging " << lc << " status " << stat  << " index " << idx;);
     switch (sz) {
         case 0:
+            if (m_units[idx].find(null_bool_var, old_i)) break;
+            m_units[idx].insert(null_bool_var, i);
+            lc[0] = null_literal;
+            m_ctrail.push_back(lv_st(lc, stat, nullptr, idx));
             break;
         case 1:
-            if (c[0] != null_literal)
-                s->mk_clause(lc, status::redundant());
+            SASSERT(c[0] != null_literal);
+            if (m_units[idx].find(c[0].var(), old_i)) break;
+            s->mk_clause(lc, status::redundant());
             m_units[idx].insert(c[0].var(), i);
             m_ctrail.push_back(lv_st(lc, stat, nullptr, idx));
             break;
         case 2:
-            l = c[0];
-            k = c[1];
-            if (k < l) std::swap(l, k);
-            s->mk_clause(l, k, status::redundant());
-            m_binary[idx].insert(hash_u_u(l.hash(), k.hash()), i);
+            hash = hash_u_u(lc[0].hash(), lc[1].hash());
+            if (m_binary[idx].find(hash, old_i)) break;
+            s->mk_clause(lc, status::redundant());
+            m_binary[idx].insert(hash, i);
             m_ctrail.push_back(lv_st(lc, stat, nullptr, idx));
             break;
         default:
+            if (m_clauses[idx].find(lc, old_i)) break;
             cidx = s->mk_clause(lc, status::redundant());
             m_clauses[idx].insert(lc, i);
             m_ctrail.push_back(lv_st(lc, stat, cidx, idx));

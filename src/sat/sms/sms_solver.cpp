@@ -131,10 +131,9 @@ void sms_solver::learn_clause_and_update_justification(
     literal_vector cls;
     cls.push_back(l);
     for (auto a : antecedent) cls.push_back(~a);
-
-    if (m_drating) drat_dump_cp(cls, idx);
     bool unique_max = false;
     place_highest_dl_at_start(cls, unique_max);
+    if (m_drating) drat_dump_cp(cls, idx);
     clause* c = learn_clause(cls, true);
     justification js = m_solver->get_justification(l);
     justification njs(js.level());

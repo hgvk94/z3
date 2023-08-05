@@ -787,6 +787,8 @@ namespace sat {
             out << "a";
         else if (st.is_redundant() && !st.is_sat())
             out << "r";
+        else if (st.is_copied())
+            out << "c " << st.m_src;
         if (!st.is_sat())
             out << " " << p.th(st.get_th());
         return out;
