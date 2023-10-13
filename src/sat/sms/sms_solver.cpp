@@ -354,13 +354,20 @@ bool sms_solver::exit_speculation(literal &l) {
     if (m_lam_switch == 0) return false;
     if (get_mode() != SEARCH || !m_nSolver || m_nSolver->get_mode() != PROPAGATE || m_solver->trail_size() == 0)
         return false;
-    if (m_solver->scope_lvl() <= m_spec_lvl + 3) return false;
+    //if (m_solver->scope_lvl() <= m_spec_lvl + 3) return false;
+    if (m_solver->get_stats().m_conflict < 2*m_conflict_limit) return false;
     for (unsigned i = m_solver->trail_size() - 1; i > m_solver->init_trail_size(); i--) {
         l = m_solver->trail_literal(i);
-        if (is_shared(l.var()) && m_solver->lvl(l) >= m_spec_lvl) return true;
+        if (is_shared(l.var()) && m_solver->lvl(l) > m_spec_lvl) return true;
     }
     l = null_literal;
     return false;
+}
+
+bool sms_solver::switch_to_lam() {
+    if (m_lam_switch == 0) return false;
+    return m_solver->get_stats().m_conflict >= 2*m_conflict_limit;
+    //return (m_solver->scope_lvl() >= m_search_lvl + 3);
 }
 
 bool sms_solver::decide(bool_var &next, lbool &phase) {
@@ -382,8 +389,8 @@ bool sms_solver::decide(bool_var &next, lbool &phase) {
         //return true so that the sat solver will unassign next from case_split_queue
         return true;
     }
-    //never enter speculative execution
-    if (m_lam_switch == 0 || !m_pSolver) return false;
+    //should enter speculative execution
+    if (!m_pSolver || !switch_to_lam()) return false;
     //all preferred variables have been picked, speculate
     SASSERT(m_solver->scope_lvl() > 0);
     unsigned search_lvl = m_solver->scope_lvl() - 1;
@@ -428,13 +435,33 @@ bool sms_solver::decide(bool_var &next, lbool &phase) {
         case l_undef: {
             m_pSolver->set_prop_mode();
             set_search_mode(0);
+            search_lvl = m_spec_lvl;
             set_spec_lvl(0);
             m_pSolver->reset_unresolvable();
             literal l = m_next_lit;
             SASSERT(l != null_literal);
             set_next_lit(null_literal);
-            //backjumpt to spec_lvl and make a decision
-            pop_no_reinit(m_solver->scope_lvl() - m_spec_lvl);
+            //exit speculation by backjumping to the highest level below spec_lvl where l is undef
+
+            //if the refine literal does not have a value in current solver,
+            //backjump to most recent decision but refine on the refine literal
+            if (m_solver->value(l) == l_undef) {
+                unsigned bj_lvl = search_lvl <= 1 ? 0 : search_lvl - 2;
+                pop_no_reinit(m_solver->scope_lvl() - bj_lvl);
+                //m_pSolver might have propagated unit literals that have not made it to the nSolver
+                unit_propagate();
+                if (m_solver->inconsistent()) return false;
+                m_solver->push();
+                next = l.var();
+                phase = l.sign() ? l_true : l_false;
+                SASSERT(m_solver->value(next) == l_undef);
+                return true;
+            }
+
+            //undo decisions during speculation as well as l
+            unsigned bj_lvl = search_lvl <= 1 ? 0 : m_solver->lvl(l) > search_lvl ? search_lvl - 2 : m_solver->lvl(l) - 1;
+            SASSERT(m_solver->scope_lvl() >= bj_lvl);
+            pop_no_reinit(m_solver->scope_lvl() - bj_lvl);
             m_solver->push();
             next = l.var();
             phase = l.sign() ? l_true : l_false;
@@ -469,10 +496,6 @@ check_result sms_solver::check() {
     unit_propagate();
     SASSERT(m_solver->scope_lvl() < full_assign_lvl);
     return check_result::CR_CONTINUE;
-}
-
-bool sms_solver::switch_to_lam() {
-    return m_lam_switch > 0;
 }
 
 /*
@@ -616,7 +639,8 @@ lbool sms_solver::modular_solve(unsigned lvl) {
     //refine using m_ext_core
     if (r == l_undef && m_nSolver) {
         SASSERT(m_nSolver->get_mode() == PROPAGATE);
-        m_nSolver->set_next_lit(m_solver->get_ext_core()->get(0));
+        if (m_nSolver->next_lit_null())
+            m_nSolver->set_next_lit(m_solver->get_ext_core()->get(0));
     }
     dbg_print_stat("finished modular solve with", r);
     return r;

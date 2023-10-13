@@ -43,6 +43,7 @@ namespace sat {
         hashtable<literal_vector, hash, eq> m_mark;
         bool is_marked(literal_vector& lc) { return m_mark.contains(lc); }
         void mark(literal_vector& lc) {  m_mark.insert(lc); m_deps.insert_if_not_there(lc, vector<unsigned>()); }
+        void unmark(literal_vector& lc) { m_mark.remove(lc); m_deps.remove(lc); }
         void mark(lv_st c) { mark(std::get<0>(c)); }
         bool is_input(lv_st c) { return std::get<1>(c).is_input(); }
         bool is_fwd_cp(status st) { return st.is_copied() && st.get_src() == PSOLVER_EXT_IDX_ORIG; }

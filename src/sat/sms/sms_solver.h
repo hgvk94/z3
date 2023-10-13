@@ -137,13 +137,14 @@ class sms_solver : public extension {
     }
     //exit speculation
     bool exit_speculation(literal& l);
+    unsigned m_conflict_limit;
   public:
     sms_solver(ast_manager &am, symbol const &name, int id, const params_ref p)
         : extension(name, id), m(am), m_var2expr(m),
           m_pSolver(nullptr), m_nSolver(nullptr), m_tx_idx(0),
           m_construct_itp(false),
           m_mode(SEARCH), m_exiting(false), m_search_lvl(0), m_spec_lvl(0),
-          m_next_lit(null_literal), m_unsat(false), m_itp(nullptr) {
+          m_next_lit(null_literal), m_unsat(false), m_itp(nullptr), m_conflict_limit(0) {
         update_params(p);
         m_ext_clause = alloc(literal_vector);
     }
@@ -168,6 +169,7 @@ class sms_solver : public extension {
     void reset_unresolvable() { m_solver->reset_unresolvable(); }
 
     void set_next_lit(literal l) { dbg_print_stat("refining on lit ", l) m_next_lit = l; }
+    bool next_lit_null() { return m_next_lit == null_literal; }
     void reset_next_decision() { m_next_lit = null_literal; }
     unsigned get_search_lvl() const { return m_search_lvl; }
     unsigned get_scope_lvl() const { return m_solver->scope_lvl(); }
@@ -185,10 +187,11 @@ class sms_solver : public extension {
     // when refining, solver backjumps to m_spec_lvl
     void set_spec_lvl(unsigned lvl) {
         m_spec_lvl = lvl;
+        m_conflict_limit = m_solver->get_stats().m_conflict;
     }
 
     sms_mode get_mode() { return m_mode; }
-    void set_prop_mode() { m_mode = PROPAGATE; m_search_lvl = 0; m_made_shared_assignment = false; }
+    void set_prop_mode() { m_mode = PROPAGATE; m_search_lvl = 0; m_made_shared_assignment = false; m_spec_lvl = 0; }
     void set_fin_mode() { m_mode = FINISHED; m_search_lvl = 0; m_made_shared_assignment = false; }
     void learn_ext_core(sms_solver* solver);
     void handle_mode_transition();
