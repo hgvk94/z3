@@ -297,7 +297,7 @@ namespace mbp {
 
           expr_ref res(atom, m);
 
-          if (try_int_mul_solve(atom, is_pos, res)) return res;
+          // if (try_int_mul_solve(atom, is_pos, res)) return res;
 
           expr *e1, *e2;
 

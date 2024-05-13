@@ -80,10 +80,11 @@ namespace  {
             ast_manager &m;
             array_util m_arr;
             datatype_util m_dt_util;
+            arith_util m_arith;
             model_evaluator m_eval;
             expr_ref val;
 
-            app_const_arr_rewriter(ast_manager& man, model& mdl): m(man), m_arr(m), m_dt_util(m), m_eval(mdl), val(m) {
+            app_const_arr_rewriter(ast_manager& man, model& mdl): m(man), m_arr(m), m_dt_util(m), m_arith(m), m_eval(mdl), val(m) {
                 m_eval.set_model_completion(false);
             }
             br_status reduce_app(func_decl *f, unsigned num, expr *const *args,
@@ -92,6 +93,11 @@ namespace  {
                     val = m_eval(args[0]);
                     SASSERT(m.is_value(val));
                     result = m_arr.mk_const_array(f->get_range(), val);
+                    return BR_DONE;
+                }
+                /* rewrite mod(x,y) to mod(x, M[y]) */
+                if (m_arith.is_mod(f) && !m_arith.is_numeral(args[1])) {
+                    result = m_arith.mk_mod(args[0], m_eval(args[1]));
                     return BR_DONE;
                 }
                 if (m_dt_util.is_constructor(f)) {
