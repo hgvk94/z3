@@ -75,64 +75,6 @@ namespace  {
                 return BR_FAILED;
             }
     };
-// rewrite all occurrences of (as const arr c) to (as const arr v) where v = m_eval(c)
-    struct app_const_arr_rewriter : public default_rewriter_cfg {
-            ast_manager &m;
-            array_util m_arr;
-            datatype_util m_dt_util;
-            arith_util m_arith;
-            model_evaluator m_eval;
-            expr_ref val;
-
-            app_const_arr_rewriter(ast_manager& man, model& mdl): m(man), m_arr(m), m_dt_util(m), m_arith(m), m_eval(mdl), val(m) {
-                m_eval.set_model_completion(false);
-            }
-            br_status reduce_app(func_decl *f, unsigned num, expr *const *args,
-                                 expr_ref &result, proof_ref &result_pr) {
-                if (m_arr.is_const(f) && !m.is_value(args[0])) {
-                    val = m_eval(args[0]);
-                    SASSERT(m.is_value(val));
-                    result = m_arr.mk_const_array(f->get_range(), val);
-                    return BR_DONE;
-                }
-                /* rewrite mod(x,y) to mod(x, M[y]) */
-                if (m_arith.is_mod(f) && !m_arith.is_numeral(args[1])) {
-                    result = m_arith.mk_mod(args[0], m_eval(args[1]));
-                    return BR_DONE;
-                }
-                if (m_dt_util.is_constructor(f)) {
-                    // cons(head(x), tail(x)) --> x
-                    ptr_vector<func_decl> const *accessors =
-                        m_dt_util.get_constructor_accessors(f);
-
-                    SASSERT(num == accessors->size());
-                    // -- all accessors must have exactly one argument
-                    if (any_of(*accessors, [&](const func_decl* acc) { return acc->get_arity() != 1; })) {
-                        return BR_FAILED;
-                    }
-
-                    if (num >= 1 && is_app(args[0]) && to_app(args[0])->get_decl() == accessors->get(0)) {
-                        bool is_all = true;
-                        expr* t = to_app(args[0])->get_arg(0);
-                        for(unsigned i = 1; i < num && is_all; ++i) {
-                            is_all &= (is_app(args[i]) &&
-                                       to_app(args[i])->get_decl() == accessors->get(i) &&
-                                       to_app(args[i])->get_arg(0) == t);
-                        }
-                        if (is_all) {
-                            result = t;
-                            return BR_DONE;
-                        }
-                    }
-                }
-                return BR_FAILED;
-            }
-    };
-}
-void rewrite_as_const_arr(expr* in, model& mdl, expr_ref& out) {
-    app_const_arr_rewriter cfg(out.m(), mdl);
-    rewriter_tpl<app_const_arr_rewriter> rw(out.m(), false, cfg);
-    rw(in, out);
 }
 
 void rewrite_read_over_write(expr *in, model &mdl, expr_ref &out) {
@@ -388,7 +330,6 @@ public:
             //rewrite as_const_arr terms
             expr_ref fml(m);
             fml = mk_and(fmls);
-            rewrite_as_const_arr(fml, model, fml);
             flatten_and(fml, fmls);
         }
         else {
@@ -548,7 +489,6 @@ public:
         qel_project(vars, mdl, fml, m_reduce_all_selects);
         flatten_and(fml);
         m_rw(fml);
-        rewrite_as_const_arr(fml, mdl, fml);
 
         for (app* v : vars) {
             SASSERT(!arr_u.is_array(v) && !dt_u.is_datatype(v->get_sort()));
@@ -721,5 +661,4 @@ opt::inf_eps mbproj::maximize(expr_ref_vector const& fmls, model& mdl, app* t, e
     scoped_no_proof _sp(fmls.get_manager());
     return m_impl->maximize(fmls, mdl, t, ge, gt);
 }
-template class rewriter_tpl<app_const_arr_rewriter>;
 template class rewriter_tpl<rd_over_wr_rewriter>;

@@ -31,14 +31,100 @@ Notes:
 #include "ast/for_each_expr.h"
 #include "ast/occurs.h"
 #include "ast/rewriter/th_rewriter.h"
+#include "ast/rewriter/rewriter_types.h"
 #include "model/model_evaluator.h"
 #include "qe/mbp/mbp_arrays.h"
 #include "util/bit_vector.h"
 #include "util/obj_pair_hashtable.h"
 #include "util/uint_set.h"
 #include "util/util.h"
+#include "ast/rewriter/th_rewriter.h"
+#include "ast/rewriter/rewriter.h"
+#include "ast/rewriter/rewriter_def.h"
+
+namespace {
+// 1) rewrite all occurrences of (as const arr c) to (as const arr v) where (1) m_tg.has_val_in_class(c) and m_tg |models c = v and v is a value
+// 2) rewrite mod a b in the same way
+// 3) rewrite * a b in the same way
+struct tg_op_rw : public default_rewriter_cfg {
+            ast_manager &m;
+            array_util m_arr;
+            datatype_util m_dt_util;
+            arith_util m_arith;
+            mbp::term_graph &m_tg;
+            expr_ref val;
+
+            tg_op_rw(ast_manager& man, mbp::term_graph& tg): m(man), m_arr(m), m_dt_util(m), m_arith(m), m_tg(tg), val(m) { }
+            br_status reduce_app(func_decl *f, unsigned num, expr *const *args,
+                                 expr_ref &result, proof_ref &result_pr) {
+                expr* val;
+                if (m_arr.is_const(f) && !m.is_value(args[0])) {
+                    if(m_tg.has_val_in_class(args[0], val)) {
+                        result = m_arr.mk_const_array(f->get_range(), val);
+                        return BR_DONE;
+                    }
+                    return BR_FAILED;
+                }
+                /* rewrite mod(x,y) to mod(x, M[y]) */
+                if (m_arith.is_mod(f) && !m_arith.is_numeral(args[1]) && m_tg.has_val_in_class(args[1], val)) {
+                    result = m_arith.mk_mod(args[0], val);
+                    return BR_DONE;
+                }
+                /* rewrite multiplication to be over values eagerly. i.e in a
+                 * term (* t1 t2 ... tn), for all ti s.t. m_tg \models ti = val,
+                 * replace ti with val */
+                /* x = 2 && y = 4 && 2*x = y  will be rewritten to x = 2 && y = 4 && 2*2 = y*/
+                /* Ideally, we would like the above expression to be rewritten
+                 * to 2*x = y. However, we do not know if the class of x
+                 * contains variables to be eliminated or not. e.g. if term
+                 * graph also contained a literal xn = x where xn is not in the
+                 * core. This rewriter cannot choose between x and xn */
+                if (m_arith.is_mul(f)) {
+                    expr_ref_vector new_args(m);
+                    /*in v1*v2, substitute v1 with const*/
+                    for (unsigned i = 0; i < num; i++) {
+                        new_args.push_back(m_tg.has_val_in_class(args[i], val) ? val : args[i]);
+                    }
+                    result = m.mk_app(f, new_args);
+                    return BR_DONE;
+                }
+                // cons(head(x), tail(x)) --> x
+                if (m_dt_util.is_constructor(f)) {
+                    ptr_vector<func_decl> const *accessors =
+                        m_dt_util.get_constructor_accessors(f);
+
+                    SASSERT(num == accessors->size());
+                    // -- all accessors must have exactly one argument
+                    if (any_of(*accessors, [&](const func_decl* acc) { return acc->get_arity() != 1; })) {
+                        return BR_FAILED;
+                    }
+
+                    if (num >= 1 && is_app(args[0]) && to_app(args[0])->get_decl() == accessors->get(0)) {
+                        bool is_all = true;
+                        expr* t = to_app(args[0])->get_arg(0);
+                        for(unsigned i = 1; i < num && is_all; ++i) {
+                            is_all &= (is_app(args[i]) &&
+                                       to_app(args[i])->get_decl() == accessors->get(i) &&
+                                       to_app(args[i])->get_arg(0) == t);
+                        }
+                        if (is_all) {
+                            result = t;
+                            return BR_DONE;
+                        }
+                    }
+                }
+                return BR_FAILED;
+            }
+    };
+}
 
 namespace mbp {
+
+void rw(expr* in, term_graph& tg, expr_ref& out) {
+    tg_op_rw cfg(out.m(), tg);
+    rewriter_tpl<tg_op_rw> m_rw(out.m(), false, cfg);
+    m_rw(in, out);
+}
 
 static expr_ref mk_neq(ast_manager &m, expr *e1, expr *e2) {
     expr *t = nullptr;
@@ -950,7 +1036,7 @@ void term_graph::refine_repr() {
             refine_repr_class(t->get_repr());
 }
 
-// returns true if tg ==> e = v where v is a value
+// returns true if tg ==> e = val where val is a value.
 bool term_graph::has_val_in_class(expr *e) {
     term *r = get_term(e);
     if (!r) return false;
@@ -963,19 +1049,38 @@ bool term_graph::has_val_in_class(expr *e) {
     return false;
 }
 
-// if there exists an uninterpreted const c s.t. tg ==> e = c, return c
-// else return nullptr
-app *term_graph::get_const_in_class(expr *e) {
+// returns true if tg ==> e = val where val is a value. If true, v stores the value
+bool term_graph::has_val_in_class(expr *e, expr* &v) {
+    term *r = get_term(e);
+    if (!r) return false;
+    auto is_val = [&](term *t) { return m.is_value(t->get_expr()); };
+    v = e;
+    if (is_val(r))
+        return true;
+    for (term *it = &r->get_next(); it != r; it = &it->get_next())
+        if (is_val(it)) {
+            v = it->get_expr();
+            return true;
+        }
+    return false;
+}
+
+// if there exists an uninterpreted const c s.t. tg ==> e = c, return true and store c in u
+bool term_graph::has_const_in_class(expr *e, app_ref &u) {
     term *r = get_term(e);
     if (!r)
-        return nullptr;
+        return false;
     auto is_const = [](term *t) { return is_uninterp_const(t->get_expr()); };
-    if (is_const(r))
-        return ::to_app(r->get_expr());
+    if (is_const(r)) {
+        u = ::to_app(r->get_expr());
+        return true;
+    }
     for (term *it = &r->get_next(); it != r; it = &it->get_next())
-        if (is_const(it))
-            return ::to_app(it->get_expr());
-    return nullptr;
+        if (is_const(it)) {
+            u =  ::to_app(it->get_expr());
+            return true;
+        }
+    return false;
 }
 
 void term_graph::display(std::ostream &out) {
@@ -1627,6 +1732,7 @@ void term_graph::qel(app_ref_vector &vars, expr_ref &fml,
         if (mark.is_marked(v)) vars[i++] = v;
     }
     vars.shrink(i);
+    rw(fml, *this, fml);
 }
 
 void term_graph::set_vars(func_decl_ref_vector const &decls, bool exclude) {
@@ -1868,3 +1974,4 @@ void term_graph::compute_cground() {
     });
 }
 } // namespace mbp
+template class rewriter_tpl<tg_op_rw>;

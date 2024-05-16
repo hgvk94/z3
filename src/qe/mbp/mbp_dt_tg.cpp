@@ -88,8 +88,7 @@ struct mbp_dt_tg::impl {
         for (unsigned i = 0; i < accessors->size(); i++) {
             func_decl *d = accessors->get(i);
             sel = m.mk_app(d, v);
-            u = m_tg.get_const_in_class(sel);
-            if (u) {
+            if (m_tg.has_const_in_class(sel, u)) {
                 new_vars.push_back(u);
                 continue;
             }

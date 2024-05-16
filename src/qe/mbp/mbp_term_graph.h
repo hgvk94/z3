@@ -235,8 +235,9 @@ public:
     // output of qel will not contain expression e s.t. non_core(e) == true
     void qel(app_ref_vector &vars, expr_ref &fml,
              std::function<bool(expr *)> *non_core = nullptr);
+    bool has_val_in_class(expr *e, expr* &v);
     bool has_val_in_class(expr *e);
-    app *get_const_in_class(expr *e);
+    bool has_const_in_class(expr *e, app_ref &u);
     void set_explicit_eq() { m_explicit_eq = true; }
 
 private:
