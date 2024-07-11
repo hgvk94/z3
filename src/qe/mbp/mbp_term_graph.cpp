@@ -65,26 +65,35 @@ struct tg_op_rw : public default_rewriter_cfg {
                     }
                     return BR_FAILED;
                 }
-                /* rewrite mod(x,y) to mod(x, M[y]) */
+                /* rewrite mod(x,y) to mod(x, v) where v is value in the class of y*/
                 if (m_arith.is_mod(f) && !m_arith.is_numeral(args[1]) && m_tg.has_val_in_class(args[1], val)) {
                     result = m_arith.mk_mod(args[0], val);
                     return BR_DONE;
                 }
-                /* rewrite multiplication to be over values eagerly. i.e in a
-                 * term (* t1 t2 ... tn), for all ti s.t. m_tg \models ti = val,
-                 * replace ti with val */
-                /* x = 2 && y = 4 && 2*x = y  will be rewritten to x = 2 && y = 4 && 2*2 = y*/
-                /* Ideally, we would like the above expression to be rewritten
-                 * to 2*x = y. However, we do not know if the class of x
-                 * contains variables to be eliminated or not. e.g. if term
-                 * graph also contained a literal xn = x where xn is not in the
-                 * core. This rewriter cannot choose between x and xn */
+                /* rewrite non-linear multiplication into linear by replacing non-value expressions with values */
+                /* rewrite multiplication to be over values eagerly. i.e in
+                 * (* t1 t2 ... tn), where c terms are non-values, replace the first c-1 terms t s.t. m_tg \models t = val, with values.
+                  */
                 if (m_arith.is_mul(f)) {
                     expr_ref_vector new_args(m);
+                    unsigned count = 0;
+                    std::function<bool(expr*)> isVal = [&](expr *e) { return m.is_value(e) || (is_app(e) && all_of(*(to_app(e)), isVal)); };
+                    for (unsigned i = 0; i < num; i++) {
+                        if (!isVal(args[i])) count++;
+                    }
+                    if (count <= 1)
+                        return BR_FAILED;
                     /*in v1*v2, substitute v1 with const*/
                     for (unsigned i = 0; i < num; i++) {
-                        new_args.push_back(m_tg.has_val_in_class(args[i], val) ? val : args[i]);
+                        if (count > 1 && !isVal(args[i]) && m_tg.has_val_in_class(args[i], val)) {
+                            new_args.push_back(val);
+                            count--;
+                        }
+                        else {
+                            new_args.push_back(args[i]);
+                        }
                     }
+                    SASSERT(new_args.size() == num);
                     result = m.mk_app(f, new_args);
                     return BR_DONE;
                 }
